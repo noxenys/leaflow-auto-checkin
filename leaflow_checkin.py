@@ -103,139 +103,164 @@ class LeaflowAutoCheckin:
         )
     
     def login(self):
-        """执行登录流程"""
-        logger.info(f"开始登录流程")
+        """执行登录流程，支持重试机制"""
+        max_retries = 3
         
-        # 访问登录页面
-        self.driver.get("https://leaflow.net/login")
-        time.sleep(5)
-        
-        # 关闭弹窗
-        self.close_popup()
-        
-        # 输入邮箱
-        try:
-            logger.info("查找邮箱输入框...")
-            
-            # 等待页面稳定
-            time.sleep(2)
-            
-            # 尝试多种选择器找到邮箱输入框
-            email_selectors = [
-                "input[type='text']",
-                "input[type='email']", 
-                "input[placeholder*='邮箱']",
-                "input[placeholder*='邮件']",
-                "input[placeholder*='email']",
-                "input[name='email']",
-                "input[name='username']"
-            ]
-            
-            email_input = None
-            for selector in email_selectors:
-                try:
-                    email_input = self.wait_for_element_clickable(By.CSS_SELECTOR, selector, 5)
-                    logger.info(f"找到邮箱输入框")
-                    break
-                except:
-                    continue
-            
-            if not email_input:
-                raise Exception("找不到邮箱输入框")
-            
-            # 清除并输入邮箱
-            email_input.clear()
-            email_input.send_keys(self.email)
-            logger.info("邮箱输入完成")
-            time.sleep(2)
-            
-        except Exception as e:
-            logger.error(f"输入邮箱时出错: {e}")
-            # 尝试使用JavaScript直接设置值
+        for attempt in range(max_retries):
             try:
-                self.driver.execute_script(f"document.querySelector('input[type=\"text\"], input[type=\"email\"]').value = '{self.email}';")
-                logger.info("通过JavaScript设置邮箱")
-                time.sleep(2)
-            except:
-                raise Exception(f"无法输入邮箱: {e}")
-        
-        # 等待密码输入框出现并输入密码
-        try:
-            logger.info("查找密码输入框...")
-            
-            # 等待密码框出现
-            password_input = self.wait_for_element_clickable(
-                By.CSS_SELECTOR, "input[type='password']", 10
-            )
-            
-            password_input.clear()
-            password_input.send_keys(self.password)
-            logger.info("密码输入完成")
-            time.sleep(1)
-            
-        except TimeoutException:
-            raise Exception("找不到密码输入框")
-        
-        # 点击登录按钮
-        try:
-            logger.info("查找登录按钮...")
-            login_btn_selectors = [
-                "//button[contains(text(), '登录')]",
-                "//button[contains(text(), 'Login')]",
-                "//button[@type='submit']",
-                "//input[@type='submit']",
-                "button[type='submit']"
-            ]
-            
-            login_btn = None
-            for selector in login_btn_selectors:
-                try:
-                    if selector.startswith("//"):
-                        login_btn = self.wait_for_element_clickable(By.XPATH, selector, 5)
-                    else:
-                        login_btn = self.wait_for_element_clickable(By.CSS_SELECTOR, selector, 5)
-                    logger.info(f"找到登录按钮")
-                    break
-                except:
-                    continue
-            
-            if not login_btn:
-                raise Exception("找不到登录按钮")
-            
-            login_btn.click()
-            logger.info("已点击登录按钮")
-            
-        except Exception as e:
-            raise Exception(f"点击登录按钮失败: {e}")
-        
-        # 等待登录完成
-        try:
-            WebDriverWait(self.driver, 20).until(
-                lambda driver: "dashboard" in driver.current_url or "workspaces" in driver.current_url or "login" not in driver.current_url
-            )
-            
-            # 检查当前URL确认登录成功
-            current_url = self.driver.current_url
-            if "dashboard" in current_url or "workspaces" in current_url or "login" not in current_url:
-                logger.info(f"登录成功，当前URL: {current_url}")
-                return True
-            else:
-                raise Exception("登录后未跳转到正确页面")
+                logger.info(f"开始登录流程，第 {attempt + 1}/{max_retries} 次尝试...")
                 
-        except TimeoutException:
-            # 检查是否登录失败
-            try:
-                error_selectors = [".error", ".alert-danger", "[class*='error']", "[class*='danger']"]
-                for selector in error_selectors:
+                # 访问登录页面
+                self.driver.get("https://leaflow.net/login")
+                
+                # 显式等待页面完全加载，防止在白屏阶段就开始查找元素
+                WebDriverWait(self.driver, 40).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                
+                time.sleep(5)
+        
+                # 关闭弹窗
+                self.close_popup()
+                
+                # 输入邮箱
+                try:
+                    logger.info("查找邮箱输入框...")
+                    
+                    # 等待页面稳定
+                    time.sleep(2)
+                    
+                    # 尝试多种选择器找到邮箱输入框
+                    email_selectors = [
+                        "input[type='text']",
+                        "input[type='email']", 
+                        "input[placeholder*='邮箱']",
+                        "input[placeholder*='邮件']",
+                        "input[placeholder*='email']",
+                        "input[name='email']",
+                        "input[name='username']"
+                    ]
+                    
+                    email_input = None
+                    for selector in email_selectors:
+                        try:
+                            email_input = self.wait_for_element_clickable(By.CSS_SELECTOR, selector, 5)
+                            logger.info(f"找到邮箱输入框")
+                            break
+                        except:
+                            continue
+                    
+                    if not email_input:
+                        raise Exception("找不到邮箱输入框")
+                    
+                    # 清除并输入邮箱
+                    email_input.clear()
+                    email_input.send_keys(self.email)
+                    logger.info("邮箱输入完成")
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    logger.error(f"输入邮箱时出错: {e}")
+                    # 尝试使用JavaScript直接设置值
                     try:
-                        error_msg = self.driver.find_element(By.CSS_SELECTOR, selector)
-                        if error_msg.is_displayed():
-                            raise Exception(f"登录失败: {error_msg.text}")
+                        self.driver.execute_script(f"document.querySelector('input[type=\"text\"], input[type=\"email\"]').value = '{self.email}';")
+                        logger.info("通过JavaScript设置邮箱")
+                        time.sleep(2)
                     except:
-                        continue
-                raise Exception("登录超时，无法确认登录状态")
+                        raise Exception(f"无法输入邮箱: {e}")
+                
+                # 等待密码输入框出现并输入密码
+                try:
+                    logger.info("查找密码输入框...")
+                    
+                    # 等待密码框出现
+                    password_input = self.wait_for_element_clickable(
+                        By.CSS_SELECTOR, "input[type='password']", 10
+                    )
+                    
+                    password_input.clear()
+                    password_input.send_keys(self.password)
+                    logger.info("密码输入完成")
+                    time.sleep(1)
+                    
+                except TimeoutException:
+                    raise Exception("找不到密码输入框")
+                
+                # 点击登录按钮
+                try:
+                    logger.info("查找登录按钮...")
+                    login_btn_selectors = [
+                        "//button[contains(text(), '登录')]",
+                        "//button[contains(text(), 'Login')]",
+                        "//button[@type='submit']",
+                        "//input[@type='submit']",
+                        "button[type='submit']"
+                    ]
+                    
+                    login_btn = None
+                    for selector in login_btn_selectors:
+                        try:
+                            if selector.startswith("//"):
+                                login_btn = self.wait_for_element_clickable(By.XPATH, selector, 5)
+                            else:
+                                login_btn = self.wait_for_element_clickable(By.CSS_SELECTOR, selector, 5)
+                            logger.info(f"找到登录按钮")
+                            break
+                        except:
+                            continue
+                    
+                    if not login_btn:
+                        raise Exception("找不到登录按钮")
+                    
+                    login_btn.click()
+                    logger.info("已点击登录按钮")
+                    
+                except Exception as e:
+                    raise Exception(f"点击登录按钮失败: {e}")
+                
+                # 等待登录完成 - 延长超时时间到40秒，给Cloudflare的5秒盾留出更多通过时间
+                try:
+                    WebDriverWait(self.driver, 40).until(
+                        lambda driver: "dashboard" in driver.current_url or "workspaces" in driver.current_url or "login" not in driver.current_url
+                    )
+                    
+                    # 检查当前URL确认登录成功
+                    current_url = self.driver.current_url
+                    if "dashboard" in current_url or "workspaces" in current_url or "login" not in current_url:
+                        logger.info(f"登录成功，当前URL: {current_url}")
+                        return True
+                    else:
+                        raise Exception("登录后未跳转到正确页面")
+                        
+                except TimeoutException:
+                    # 检查是否登录失败
+                    try:
+                        error_selectors = [".error", ".alert-danger", "[class*='error']", "[class*='danger']"]
+                        for selector in error_selectors:
+                            try:
+                                error_msg = self.driver.find_element(By.CSS_SELECTOR, selector)
+                                if error_msg.is_displayed():
+                                    raise Exception(f"登录失败: {error_msg.text}")
+                            except:
+                                continue
+                        raise Exception("登录超时，无法确认登录状态")
+                    except Exception as e:
+                        raise e
+                
             except Exception as e:
-                raise e
+                logger.warning(f"第 {attempt + 1} 次登录尝试失败: {e}")
+                
+                # 如果不是最后一次尝试，刷新页面并等待后重试
+                if attempt < max_retries - 1:
+                    logger.info(f"正在进行第 {attempt + 2} 次重试...")
+                    self.driver.refresh()
+                    time.sleep(5)
+                    continue
+                else:
+                    # 最后一次尝试失败，抛出异常
+                    raise Exception(f"登录失败，已尝试 {max_retries} 次: {e}")
+        
+        return False
     
     def get_balance(self):
         """获取当前账号的总余额"""
