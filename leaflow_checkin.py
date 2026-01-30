@@ -15,7 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 import requests
 from datetime import datetime
 
@@ -44,6 +44,8 @@ class LeaflowAutoCheckin:
     def setup_driver(self):
         """设置Chrome驱动选项"""
         chrome_options = Options()
+        # Reduce page-load blocking in CI.
+        chrome_options.page_load_strategy = "eager"
         
         # 通用防检测配置
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
@@ -67,8 +69,58 @@ class LeaflowAutoCheckin:
             
             self.driver = webdriver.Chrome(options=chrome_options)
         
+        try:
+            self.driver.set_page_load_timeout(60)
+            self.driver.set_script_timeout(30)
+        except Exception:
+            pass
+
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
+    def _stop_page_load(self):
+        try:
+            self.driver.execute_script("window.stop();")
+        except Exception:
+            pass
+
+    def _is_driver_timeout(self, message):
+        if not message:
+            return False
+        return ("HTTPConnectionPool" in message or "Read timed out" in message or "read timeout" in message)
+
+    def restart_driver(self):
+        try:
+            if self.driver:
+                self.driver.quit()
+        except Exception:
+            pass
+        self.driver = None
+        self.setup_driver()
+
+    def safe_get(self, url, max_retries=2, wait_between=3):
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                self.driver.get(url)
+                return True
+            except TimeoutException as e:
+                last_error = f"TimeoutException: {e}"
+                logger.warning(f"Page load timeout for {url} ({attempt + 1}/{max_retries + 1}).")
+                self._stop_page_load()
+            except WebDriverException as e:
+                last_error = str(e)
+                logger.warning(f"WebDriver error loading {url} ({attempt + 1}/{max_retries + 1}): {e}")
+                self._stop_page_load()
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Page load error for {url} ({attempt + 1}/{max_retries + 1}): {e}")
+                self._stop_page_load()
+
+            if attempt < max_retries:
+                time.sleep(wait_between)
+
+        raise Exception(f"Failed to load page: {url}. Last error: {last_error}")
+
     def close_popup(self):
         """关闭初始弹窗"""
         try:
@@ -410,7 +462,7 @@ class LeaflowAutoCheckin:
         logger.info("跳转到签到页面...")
         
         # 跳转到签到页面
-        self.driver.get("https://checkin.leaflow.net")
+        self.safe_get("https://checkin.leaflow.net", max_retries=2, wait_between=3)
         
         # 等待签到页面加载（最多重试3次，每次等待20秒）
         if not self.wait_for_checkin_page_loaded(max_retries=3, wait_time=20):
@@ -506,6 +558,17 @@ class LeaflowAutoCheckin:
                 
         except Exception as e:
             error_msg = f"自动签到失败: {str(e)}"
+            if self._is_driver_timeout(str(e)):
+                logger.warning("Browser timeout detected, restarting driver and retrying once...")
+                try:
+                    self.restart_driver()
+                    if self.login():
+                        result = self.checkin()
+                        balance = self.get_balance()
+                        logger.info(f"Checkin result: {result}, balance: {balance}")
+                        return True, result, balance
+                except Exception as retry_e:
+                    error_msg = f"Auto checkin failed: {str(retry_e)}"
             logger.error(error_msg)
             return False, error_msg, "未知"
         
