@@ -72,6 +72,46 @@ def _require_auth(request: Request):
 @app.on_event("startup")
 def startup_event():
     _init_db()
+    _sync_env_accounts()
+
+
+def _sync_env_accounts():
+    """Sync accounts from environment variable to database"""
+    env_accounts = os.getenv("LEAFLOW_ACCOUNTS", "")
+    if not env_accounts:
+        return
+
+    conn = _get_conn()
+    try:
+        # Get existing emails to avoid duplicates
+        existing_emails = set(
+            row["email"] for row in conn.execute("SELECT email FROM accounts").fetchall()
+        )
+        
+        pairs = [x.strip() for x in env_accounts.split(",") if x.strip()]
+        new_count = 0
+        for pair in pairs:
+            if ":" not in pair:
+                continue
+            email, password = pair.split(":", 1)
+            email = email.strip()
+            password = password.strip()
+            
+            if email and password and email not in existing_emails:
+                conn.execute(
+                    "INSERT INTO accounts(email, password, created_at) VALUES (?, ?, ?)",
+                    (email, password, datetime.utcnow().isoformat()),
+                )
+                existing_emails.add(email)
+                new_count += 1
+        
+        if new_count > 0:
+            conn.commit()
+            print(f"Synced {new_count} accounts from environment variables.")
+    except Exception as e:
+        print(f"Error syncing env accounts: {e}")
+    finally:
+        conn.close()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -298,6 +338,16 @@ def run_checkin(request: Request):
                 conn.close()
 
         return {"ok": True, "items": results}
+    finally:
+        _is_running = False
+        _run_lock.release()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8080))
+    print(f"Starting Web UI on port {port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port)
     finally:
         _is_running = False
         _run_lock.release()
