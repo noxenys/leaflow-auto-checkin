@@ -343,17 +343,14 @@ def run_checkin(request: Request):
         _run_lock.release()
 
 
+@app.get("/api/status")
+def status(request: Request):
+    _require_auth(request)
+    return {"running": _is_running}
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8080))
     print(f"Starting Web UI on port {port}...")
     uvicorn.run(app, host="0.0.0.0", port=port)
-    finally:
-        _is_running = False
-        _run_lock.release()
-
-
-@app.get("/api/status")
-def status(request: Request):
-    _require_auth(request)
-    return {"running": _is_running}
