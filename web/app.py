@@ -4,6 +4,8 @@ import sqlite3
 import threading
 import time
 from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Add parent directory to sys.path to import leaflow_checkin
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,6 +20,13 @@ from leaflow_checkin import LeaflowAutoCheckin
 DB_PATH = os.getenv("DB_PATH", "./data/leaflow.db")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
+# Scheduler configuration
+# Default: 01:15 UTC (09:15 Beijing Time)
+CRON_HOUR = int(os.getenv("CRON_HOUR", 1))
+CRON_MINUTE = int(os.getenv("CRON_MINUTE", 15))
+
+scheduler = BackgroundScheduler()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
@@ -25,9 +34,19 @@ async def lifespan(app: FastAPI):
     print(f"DEBUG: Environment variables: PORT={os.getenv('PORT')}, GITHUB_ACTIONS={os.getenv('GITHUB_ACTIONS')}, RUNNING_IN_DOCKER={os.getenv('RUNNING_IN_DOCKER')}")
     _init_db()
     _sync_env_accounts()
+    
+    # Start scheduler
+    if not scheduler.running:
+        trigger = CronTrigger(hour=CRON_HOUR, minute=CRON_MINUTE, timezone='UTC')
+        scheduler.add_job(_perform_checkin_task, trigger, id='daily_checkin', replace_existing=True)
+        scheduler.start()
+        print(f"Scheduler started: Running daily at {CRON_HOUR:02d}:{CRON_MINUTE:02d} UTC")
+        
     yield
     # Shutdown logic
     print("Executing shutdown tasks...")
+    if scheduler.running:
+        scheduler.shutdown()
 
 app = FastAPI(lifespan=lifespan)
 _run_lock = threading.Lock()
@@ -97,7 +116,7 @@ def _init_db():
 @app.get("/health")
 def health_check():
     """Health check endpoint for monitoring tools"""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat(), "scheduler": scheduler.running}
 
 
 def _require_auth(request: Request):
@@ -324,26 +343,40 @@ def list_runs(request: Request, limit: int = 50):
         conn.close()
 
 
-@app.post("/api/run")
-def run_checkin(request: Request):
-    _require_auth(request)
+def _perform_checkin_task():
+    """Internal function to run the checkin logic"""
     global _is_running
     if not _run_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="already running")
+        print("Checkin task already running, skipping...")
+        return {"ok": False, "message": "already running"}
+    
     _is_running = True
+    print(f"Starting checkin task at {datetime.utcnow().isoformat()}")
     try:
         conn = _get_conn()
         accounts = conn.execute("SELECT id, email, password FROM accounts ORDER BY id ASC").fetchall()
         conn.close()
+        
         if not accounts:
+            print("No accounts found for checkin task")
             return {"ok": False, "message": "no accounts"}
 
         results = []
         for acc in accounts:
             email = acc["email"]
             password = acc["password"]
-            auto_checkin = LeaflowAutoCheckin(email, password)
-            success, result, balance = auto_checkin.run()
+            print(f"Running checkin for {email}...")
+            
+            # Run checkin logic
+            try:
+                auto_checkin = LeaflowAutoCheckin(email, password)
+                success, result, balance = auto_checkin.run()
+            except Exception as e:
+                print(f"Checkin failed for {email}: {e}")
+                success = False
+                result = f"Error: {str(e)}"
+                balance = "N/A"
+
             results.append(
                 {
                     "email": email,
@@ -367,13 +400,29 @@ def run_checkin(request: Request):
                     ),
                 )
                 conn.commit()
+            except Exception as e:
+                print(f"Failed to save run result for {email}: {e}")
             finally:
                 conn.close()
 
+        print(f"Checkin task completed. Results: {len(results)}")
         return {"ok": True, "items": results}
+    except Exception as e:
+        print(f"Checkin task failed with error: {e}")
+        raise
     finally:
         _is_running = False
         _run_lock.release()
+
+
+@app.post("/api/run")
+def run_checkin(request: Request):
+    _require_auth(request)
+    # Check if lock is available without acquiring it, because _perform_checkin_task will acquire it
+    if _is_running:
+         raise HTTPException(status_code=409, detail="already running")
+         
+    return _perform_checkin_task()
 
 
 @app.get("/api/status")
