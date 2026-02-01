@@ -33,6 +33,18 @@ _run_lock = threading.Lock()
 _is_running = False
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"DEBUG: Received request: {request.method} {request.url}")
+    try:
+        response = await call_next(request)
+        print(f"DEBUG: Request processed, status: {response.status_code}")
+        return response
+    except Exception as e:
+        print(f"DEBUG: Request failed: {e}")
+        raise
+
+
 def _ensure_db_dir():
     db_dir = os.path.dirname(DB_PATH)
     if db_dir:
