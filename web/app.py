@@ -89,12 +89,6 @@ def _require_auth(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@app.on_event("startup")
-def startup_event():
-    _init_db()
-    _sync_env_accounts()
-
-
 def _sync_env_accounts():
     """Sync accounts from environment variable to database"""
     env_accounts = os.getenv("LEAFLOW_ACCOUNTS", "")
