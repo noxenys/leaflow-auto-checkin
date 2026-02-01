@@ -371,6 +371,9 @@ def status(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 80))
+    # Debug: print environment variables related to port
+    print(f"DEBUG: Environment PORT variable is: {os.getenv('PORT')}")
+    
+    port = int(os.getenv("PORT", 8080))
     print(f"Starting Web UI on port {port}...")
     uvicorn.run(app, host="0.0.0.0", port=port)
