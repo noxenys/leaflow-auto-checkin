@@ -20,10 +20,9 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 import requests
 from datetime import datetime
 
-# 在GitHub Actions环境中使用webdriver-manager
-if os.getenv('GITHUB_ACTIONS'):
-    from webdriver_manager.chrome import ChromeDriverManager
-    from selenium.webdriver.chrome.service import Service
+# 在GitHub Actions或Docker环境中使用webdriver-manager
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
