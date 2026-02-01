@@ -57,7 +57,8 @@ jobs:
         id: version
         if: github.event_name != 'pull_request'
         run: |
-          python scripts/semver_bump.py --output "$GITHUB_OUTPUT"
+          VERSION="$(python scripts/semver_bump.py)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
