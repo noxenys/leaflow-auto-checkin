@@ -32,4 +32,10 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONIOENCODING=utf-8
 
 # Run the script
-CMD ["python", "leaflow_checkin.py"]
+# 默认启动 Web 服务，Web 服务会按需调用 checkin 脚本
+ENV PORT=5000
+EXPOSE 5000
+CMD ["python", "app.py"]
+
+# Optional web panel
+EXPOSE 8080

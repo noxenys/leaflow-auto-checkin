@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflow 自动签到管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+    <style>
+        body { background-color: #f8f9fa; padding-top: 20px; }
+        .card { margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .log-box { background: #212529; color: #00ff00; padding: 15px; border-radius: 5px; height: 400px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <h2 class="mb-4 text-center">🍃 Leaflow 自动签到管理面板</h2>
+
+        <div class="row">
+            <!-- 账号配置 -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <span>📋 账号管理</span>
+                        <button class="btn btn-sm btn-light" @click="addAccount">添加账号</button>
+                    </div>
+                    <div class="card-body">
+                        <div v-for="(acc, index) in config.accounts" :key="index" class="input-group mb-2">
+                            <input type="text" class="form-control" placeholder="邮箱" v-model="acc.email">
+                            <input type="text" class="form-control" placeholder="密码" v-model="acc.password">
+                            <button class="btn btn-danger" @click="removeAccount(index)">删除</button>
+                        </div>
+                        <div v-if="config.accounts.length === 0" class="text-muted text-center">暂无账号，请添加</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <span>🍪 Cookie 管理 (免密登录)</span>
+                        <button class="btn btn-sm btn-light" @click="addCookie">添加 Cookie</button>
+                    </div>
+                    <div class="card-body">
+                        <div v-for="(cookie, index) in config.cookies" :key="index" class="mb-2">
+                            <div class="input-group">
+                                <input type="text" class="form-control" placeholder="粘贴完整 Cookie 字符串" v-model="cookie.value">
+                                <button class="btn btn-danger" @click="removeCookie(index)">删除</button>
+                            </div>
+                            <small class="text-muted">推荐使用 Cookie，可跳过登录验证码。</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-info text-white">📢 Telegram 通知</div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <label>Bot Token</label>
+                            <input type="text" class="form-control" v-model="config.telegram.token">
+                        </div>
+                        <div class="mb-2">
+                            <label>Chat ID</label>
+                            <input type="text" class="form-control" v-model="config.telegram.chat_id">
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary w-100 mb-3" @click="saveConfig" :disabled="saving">
+                    {{ saving ? '保存中...' : '💾 保存配置' }}
+                </button>
+                <button class="btn btn-warning w-100 mb-3" @click="runCheckin" :disabled="running">
+                    {{ running ? '运行中...' : '🚀 立即运行签到' }}
+                </button>
+            </div>
+
+            <!-- 日志显示 -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <span>📜 运行日志</span>
+                        <button class="btn btn-sm btn-outline-light" @click="fetchLogs">刷新</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="log-box" ref="logBox">{{ logs }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    config: {
+                        accounts: [],
+                        cookies: [],
+                        telegram: { token: '', chat_id: '' }
+                    },
+                    logs: '加载日志中...',
+                    saving: false,
+                    running: false
+                }
+            },
+            mounted() {
+                this.fetchConfig();
+                this.fetchLogs();
+                setInterval(this.fetchLogs, 5000); // 自动刷新日志
+            },
+            methods: {
+                async fetchConfig() {
+                    try {
+                        const res = await axios.get('/api/config');
+                        this.config = res.data;
+                        if (!this.config.accounts) this.config.accounts = [];
+                        if (!this.config.cookies) this.config.cookies = [];
+                        if (!this.config.telegram) this.config.telegram = {};
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                async saveConfig() {
+                    this.saving = true;
+                    try {
+                        await axios.post('/api/config', this.config);
+                        alert('配置已保存');
+                    } catch (e) {
+                        alert('保存失败');
+                    } finally {
+                        this.saving = false;
+                    }
+                },
+                addAccount() {
+                    this.config.accounts.push({ email: '', password: '' });
+                },
+                removeAccount(index) {
+                    this.config.accounts.splice(index, 1);
+                },
+                addCookie() {
+                    // 限制只能添加一个 Cookie，因为脚本逻辑目前只支持一个
+                    if (this.config.cookies.length > 0) {
+                        alert('目前仅支持配置一个 Cookie');
+                        return;
+                    }
+                    this.config.cookies.push({ value: '' });
+                },
+                removeCookie(index) {
+                    this.config.cookies.splice(index, 1);
+                },
+                async runCheckin() {
+                    this.running = true;
+                    try {
+                        await axios.post('/api/run');
+                        alert('任务已启动，请查看日志');
+                    } catch (e) {
+                        alert('启动失败');
+                    } finally {
+                        setTimeout(() => this.running = false, 3000);
+                    }
+                },
+                async fetchLogs() {
+                    try {
+                        const res = await axios.get('/api/logs');
+                        this.logs = res.data.logs;
+                        // Auto scroll to bottom
+                        this.$nextTick(() => {
+                            const box = this.$refs.logBox;
+                            if (box) box.scrollTop = box.scrollHeight;
+                        });
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

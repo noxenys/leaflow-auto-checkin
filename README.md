@@ -113,20 +113,49 @@ docker run --rm \
 ```bash
 docker compose up --build
 ```
+默认会同时启动脚本 + 面板。如只启动其中一个：
+```bash
+docker compose up --build leaflow-checkin
+docker compose up --build leaflow-web
+```
 
 ## 可视化面板（可选）
 
-如果你希望有可视化后台/多账号管理面板，可以参考下列项目：
-- eraycc/leaflow-auto（Web 控制台）
-- stsix/leaflow-auto-beta（上游参考）
+本仓库内置一个轻量 Web 面板（FastAPI + SQLite），用于账号管理、查看签到结果、手动触发签到。
+面板账号来源于面板内录入的数据，不读取 `LEAFLOW_ACCOUNTS` 环境变量。
 
-链接：
-```text
-https://github.com/eraycc/leaflow-auto
-https://github.com/stsix/leaflow-auto-beta
+启用方式（docker compose）：
+```bash
+docker compose up --build leaflow-web
 ```
 
-## Fork 后如何更新
+默认地址：`http://<你的服务器IP>:8080`
+可选安全令牌：设置 `ADMIN_TOKEN` 后需要输入令牌才能访问。
+数据会持久化到 `./data/leaflow.db`（已在 compose 中挂载）。
+注意：账号密码会以明文存储在 SQLite 中，请确保运行环境安全。## 可视化面板（Web UI）
+
+本项目新增了内置的 Web 管理面板，方便您管理账号、Cookie 并查看实时运行日志。
+
+**启动方式：**
+使用 Docker Compose 启动（默认包含 Web 服务）：
+```bash
+docker compose up -d
+```
+启动后访问：`http://localhost:5000`
+
+**功能特性：**
+1. **账号管理**：直观添加/删除多账号。
+2. **Cookie 管理**：配置免密登录 Cookie（推荐）。
+3. **一键运行**：手动触发后台签到任务。
+4. **实时日志**：在网页端直接查看运行日志。
+5. **数据持久化**：账号配置保存在 `./data` 目录（已挂载 Docker Volume）。
+
+**界面预览：**
+简洁的 Dashboard 风格，支持移动端适配。
+
+---
+
+## 💻 本地运行指南
 
 如果你已经 Fork 过本仓库，推荐两种方式同步更新：
 

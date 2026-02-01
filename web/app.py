@@ -1,0 +1,309 @@
+import os
+import sqlite3
+import threading
+import time
+from datetime import datetime
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from leaflow_checkin import LeaflowAutoCheckin
+
+DB_PATH = os.getenv("DB_PATH", "./data/leaflow.db")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+app = FastAPI()
+_run_lock = threading.Lock()
+_is_running = False
+
+
+def _ensure_db_dir():
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+
+def _get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db():
+    _ensure_db_dir()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                email TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                result TEXT,
+                balance TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _require_auth(request: Request):
+    if not ADMIN_TOKEN:
+        return
+    token = request.headers.get("x-admin-token") or request.query_params.get("token")
+    if token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.on_event("startup")
+def startup_event():
+    _init_db()
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return HTMLResponse(
+        """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Leaflow Checkin Panel</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #0f0f10; color: #eaeaea; }
+    h1 { margin-bottom: 8px; }
+    .card { background: #17181a; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+    input, button { padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #0f0f10; color: #eaeaea; }
+    button { cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #2a2a2a; text-align: left; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .muted { color: #9aa0a6; }
+  </style>
+</head>
+<body>
+  <h1>Leaflow Checkin Panel</h1>
+  <p class="muted">Optional web UI for managing accounts and running check-ins.</p>
+
+  <div class="card">
+    <div class="row">
+      <button onclick="runCheckin()">Run Checkin</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Add Account</h3>
+    <div class="row">
+      <input id="email" placeholder="email"/>
+      <input id="password" placeholder="password" type="password"/>
+      <button onclick="addAccount()">Add</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Accounts</h3>
+    <table id="accounts"></table>
+  </div>
+
+  <div class="card">
+    <h3>Recent Runs</h3>
+    <table id="runs"></table>
+  </div>
+
+<script>
+const tokenKey = "admin_token";
+function getToken() { return localStorage.getItem(tokenKey) || ""; }
+function withAuth(headers = {}) {
+  const token = getToken();
+  if (token) headers["x-admin-token"] = token;
+  return headers;
+}
+async function fetchJSON(url, options={}) {
+  options.headers = withAuth(options.headers || {});
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    const t = prompt("Enter ADMIN_TOKEN");
+    if (t !== null) { localStorage.setItem(tokenKey, t); location.reload(); }
+    throw new Error("Unauthorized");
+  }
+  return res.json();
+}
+async function loadAccounts() {
+  const data = await fetchJSON("/api/accounts");
+  const table = document.getElementById("accounts");
+  table.innerHTML = "<tr><th>ID</th><th>Email</th><th>Actions</th></tr>";
+  data.items.forEach(a => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${a.id}</td><td>${a.email}</td><td><button onclick="delAccount(${a.id})">Delete</button></td>`;
+    table.appendChild(tr);
+  });
+}
+async function loadRuns() {
+  const data = await fetchJSON("/api/runs");
+  const table = document.getElementById("runs");
+  table.innerHTML = "<tr><th>Time</th><th>Email</th><th>Success</th><th>Result</th><th>Balance</th></tr>";
+  data.items.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.created_at}</td><td>${r.email}</td><td>${r.success ? "yes" : "no"}</td><td>${r.result || ""}</td><td>${r.balance || ""}</td>`;
+    table.appendChild(tr);
+  });
+}
+async function addAccount() {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value.trim();
+  if (!email || !password) return alert("Missing email/password");
+  await fetchJSON("/api/accounts", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({email, password})});
+  document.getElementById("email").value = "";
+  document.getElementById("password").value = "";
+  loadAccounts();
+}
+async function delAccount(id) {
+  await fetchJSON(`/api/accounts/${id}`, { method: "DELETE" });
+  loadAccounts();
+}
+async function runCheckin() {
+  document.getElementById("status").textContent = "Running...";
+  try {
+    await fetchJSON("/api/run", { method: "POST" });
+    await loadRuns();
+  } finally {
+    document.getElementById("status").textContent = "";
+  }
+}
+loadAccounts();
+loadRuns();
+</script>
+</body>
+</html>
+        """
+    )
+
+
+@app.get("/api/accounts")
+def list_accounts(request: Request):
+    _require_auth(request)
+    conn = _get_conn()
+    try:
+        rows = conn.execute("SELECT id, email, created_at FROM accounts ORDER BY id DESC").fetchall()
+        return {"items": [dict(row) for row in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/accounts")
+def add_account(request: Request, payload: dict):
+    _require_auth(request)
+    email = (payload.get("email") or "").strip()
+    password = (payload.get("password") or "").strip()
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email/password required")
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO accounts(email, password, created_at) VALUES (?, ?, ?)",
+            (email, password, datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/accounts/{account_id}")
+def delete_account(request: Request, account_id: int):
+    _require_auth(request)
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.get("/api/runs")
+def list_runs(request: Request, limit: int = 50):
+    _require_auth(request)
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT email, success, result, balance, created_at FROM runs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return {"items": [dict(row) for row in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/run")
+def run_checkin(request: Request):
+    _require_auth(request)
+    global _is_running
+    if not _run_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="already running")
+    _is_running = True
+    try:
+        conn = _get_conn()
+        accounts = conn.execute("SELECT id, email, password FROM accounts ORDER BY id ASC").fetchall()
+        conn.close()
+        if not accounts:
+            return {"ok": False, "message": "no accounts"}
+
+        results = []
+        for acc in accounts:
+            email = acc["email"]
+            password = acc["password"]
+            auto_checkin = LeaflowAutoCheckin(email, password)
+            success, result, balance = auto_checkin.run()
+            results.append(
+                {
+                    "email": email,
+                    "success": success,
+                    "result": result,
+                    "balance": balance,
+                }
+            )
+
+            conn = _get_conn()
+            try:
+                conn.execute(
+                    "INSERT INTO runs(account_id, email, success, result, balance, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        acc["id"],
+                        email,
+                        1 if success else 0,
+                        str(result),
+                        str(balance),
+                        datetime.utcnow().isoformat(),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        return {"ok": True, "items": results}
+    finally:
+        _is_running = False
+        _run_lock.release()
+
+
+@app.get("/api/status")
+def status(request: Request):
+    _require_auth(request)
+    return {"running": _is_running}
