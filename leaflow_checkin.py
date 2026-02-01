@@ -282,15 +282,13 @@ class LeaflowAutoCheckin:
             )
             time.sleep(2)
 
+            # 点击“签到试用”按钮
             click_selectors = [
                 "//button[contains(., '签到试用')]",
-                "//*[contains(normalize-space(.), '签到试用') and (self::button or self::a or @role='button')]",
-                "//*[contains(normalize-space(.), '签到试用')]/ancestor::button[1]",
-                "//*[contains(normalize-space(.), '签到试用')]/ancestor::*[@role='button' or self::a][1]",
+                "//*[contains(text(), '签到试用')]",
+                "//*[contains(normalize-space(.), '签到试用')]",
                 "//button[contains(., '签到')]",
-                "//*[contains(normalize-space(.), '签到') and (self::button or self::a or @role='button')]",
-                "//*[contains(normalize-space(.), '签到')]/ancestor::button[1]",
-                "//*[contains(normalize-space(.), '签到')]/ancestor::*[@role='button' or self::a][1]"
+                "//*[contains(text(), '签到')]"
             ]
 
             target_btn = None
@@ -301,6 +299,7 @@ class LeaflowAutoCheckin:
                         elements = self.driver.find_elements(By.XPATH, selector)
                         for element in elements:
                             if element.is_displayed():
+                                # 优先点击更具体的元素（如 button），如果是纯文本容器，尝试点击其父级
                                 target_btn = element
                                 break
                         if target_btn:
@@ -311,48 +310,59 @@ class LeaflowAutoCheckin:
                     time.sleep(0.5)
 
             if not target_btn:
-                logger.warning("未找到工作空间中的签到入口按钮")
-                # Removed "签到" from fallback to avoid clicking sidebar navigation links
+                logger.warning("未找到工作空间中的签到入口按钮，尝试使用 JS 模糊搜索...")
                 fallback_texts = ["签到试用", "每日签到", "立即签到"] 
-                # Try JS-based text search (including shadow DOM)
                 if self._js_click_by_text(fallback_texts, timeout=8):
                     target_btn = True
-                else:
-                    # Try inside iframes
-                    try:
-                        iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
-                        for iframe in iframes:
-                            try:
-                                self.driver.switch_to.frame(iframe)
-                                if self._js_click_by_text(fallback_texts, timeout=3):
-                                    target_btn = True
-                                    break
-                            except Exception:
-                                pass
-                            finally:
-                                self.driver.switch_to.default_content()
-                    except Exception:
-                        pass
 
             if not target_btn:
+                logger.warning("无法找到任何签到入口按钮")
                 return False
 
             old_handles = set(self.driver.window_handles)
             if target_btn is not True:
+                logger.info(f"点击签到入口: {target_btn.text if hasattr(target_btn, 'text') else 'Unknown'}")
                 if not self._click_element(target_btn):
-                    logger.warning("签到入口按钮点击失败")
-                    return False
+                    logger.warning("签到入口按钮点击失败，尝试 JS 点击")
+                    try:
+                        self.driver.execute_script("arguments[0].click();", target_btn)
+                    except:
+                        pass
 
-            # New window/tab
-            if self._switch_to_new_window(old_handles, timeout=8):
+            # 点击后，等待“立即签到”按钮出现作为成功标志
+            logger.info("已点击签到入口，等待签到弹窗...")
+            
+            # 1. Check for New window/tab
+            if self._switch_to_new_window(old_handles, timeout=5):
+                logger.info("检测到新窗口")
                 return True
 
-            # Modal or iframe in the same page
-            modal_keywords = ["每日签到", "签到", "已完成", "已签到"]
-            if self._switch_to_iframe_with_keywords(modal_keywords, timeout=8):
-                return True
+            # 2. Check current page or iframes for "立即签到" button
+            checkin_btn_keywords = ["立即签到", "签到"]
+            end_time = time.time() + 10
+            while time.time() < end_time:
+                # Check current DOM
+                for keyword in checkin_btn_keywords:
+                    try:
+                        # 查找包含关键字的按钮
+                        xpath = f"//button[contains(., '{keyword}')] | //*[contains(text(), '{keyword}') and @role='button']"
+                        btns = self.driver.find_elements(By.XPATH, xpath)
+                        for btn in btns:
+                            if btn.is_displayed():
+                                logger.info(f"在当前页面找到签到按钮: {keyword}")
+                                return True
+                    except:
+                        pass
+                
+                # Check iframes
+                if self._switch_to_iframe_with_keywords(checkin_btn_keywords, timeout=1):
+                    logger.info("在 iframe 中找到签到弹窗")
+                    return True
+                
+                time.sleep(1)
 
-            return True
+            logger.warning("点击签到入口后，未在限定时间内检测到签到弹窗或按钮")
+            return False # 如果没找到“立即签到”按钮，说明打开失败
         except Exception as e:
             logger.warning(f"打开工作空间签到入口失败: {e}")
             return False
