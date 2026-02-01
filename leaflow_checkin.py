@@ -850,40 +850,72 @@ class LeaflowAutoCheckin:
                 ".ant-message",    # Ant Design 消息
                 ".el-message",     # Element UI 消息
                 ".toast",          # Toast消息
-                ".notification"    # 通知
+                ".notification",    # 通知
+                "//div[contains(@class, 'ant-message-notice')]//span", # Antd具体文本
+                "//div[contains(@class, 'el-message__content')]"       # Element具体文本
             ]
             
             for selector in success_selectors:
                 try:
-                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    if element.is_displayed():
-                        text = element.text.strip()
-                        if text:
-                            return text
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        
+                    for element in elements:
+                        if element.is_displayed():
+                            text = element.text.strip()
+                            # 过滤掉非结果文本，如“签到”按钮本身的文字
+                            if text and "签到" in text and len(text) > 4: 
+                                return text
+                            if "+" in text: # 包含奖励数值
+                                return text
                 except:
                     continue
             
             # 如果没有找到特定元素，检查页面文本
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
-            important_keywords = ["成功", "签到", "获得", "恭喜", "谢谢", "感谢", "完成", "已签到", "连续签到"]
+            # 增加对日期格式的匹配 (YYYY-MM-DD)
+            import re
+            date_pattern = datetime.now().strftime("%Y-%m-%d")
             
-            for keyword in important_keywords:
-                if keyword in page_text:
-                    # 提取包含关键词的行
-                    lines = page_text.split('\n')
-                    for line in lines:
-                        if keyword in line and len(line.strip()) < 100:  # 避免提取过长的文本
-                            return line.strip()
+            lines = page_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line: continue
+                
+                # 匹配签到记录格式：日期 + 金额
+                if date_pattern in line and ("+" in line or "元" in line):
+                    return f"签到记录 {line}"
+                    
+                # 匹配常见的成功提示
+                if "签到成功" in line or "获得" in line or "恭喜" in line:
+                    if len(line) < 50: # 避免提取无关长文本
+                        return line
             
-            # 检查签到按钮状态变化
+            # 检查签到按钮状态变化作为最后的确认
             try:
-                checkin_btn = self.driver.find_element(By.CSS_SELECTOR, "button.checkin-btn")
-                if not checkin_btn.is_enabled() or "已签到" in checkin_btn.text or "disabled" in checkin_btn.get_attribute("class"):
-                    return "今日已签到完成"
+                checkin_btn = None
+                # 尝试重新定位按钮
+                btn_selectors = ["button.checkin-btn", "//button[contains(., '已签到')]"]
+                for sel in btn_selectors:
+                    try:
+                        if sel.startswith("//"):
+                            els = self.driver.find_elements(By.XPATH, sel)
+                        else:
+                            els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                        if els:
+                            checkin_btn = els[0]
+                            break
+                    except: pass
+                
+                if checkin_btn:
+                    if not checkin_btn.is_enabled() or "已签到" in checkin_btn.text:
+                        return "签到成功 (按钮状态已更新)"
             except:
                 pass
             
-            return "签到完成，但未找到具体结果消息"
+            return "签到操作已执行，但未捕获到具体奖励文本"
             
         except Exception as e:
             return f"获取签到结果时出错: {str(e)}"
