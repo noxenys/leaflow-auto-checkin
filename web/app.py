@@ -28,7 +28,9 @@ def _ensure_db_dir():
 
 
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # Set a timeout to wait for the lock to be released (default is 5.0 seconds)
+    # Increased to 30 seconds to avoid "database is locked" errors under load
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -37,6 +39,8 @@ def _init_db():
     _ensure_db_dir()
     conn = _get_conn()
     try:
+        # Enable Write-Ahead Logging (WAL) mode for better concurrency
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS accounts (
