@@ -6,6 +6,7 @@ Leaflow 多账号自动签到脚本
 """
 
 import os
+import sys
 import time
 import logging
 import html
@@ -28,12 +29,22 @@ if os.getenv('GITHUB_ACTIONS'):
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def _ensure_utf8_output():
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+_ensure_utf8_output()
+
 class LeaflowAutoCheckin:
     def __init__(self, email, password):
         self.email = email
         self.password = password
         self.telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '')
         self.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', '')
+        self.checkin_urls = self._load_checkin_urls()
         
         if not self.email or not self.password:
             raise ValueError("邮箱和密码不能为空")
@@ -77,6 +88,113 @@ class LeaflowAutoCheckin:
 
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
+    def _load_checkin_urls(self):
+        """Load check-in URLs from env, fallback to default."""
+        urls = []
+        raw_urls = os.getenv('LEAFLOW_CHECKIN_URLS', '').strip()
+        raw_url = os.getenv('LEAFLOW_CHECKIN_URL', '').strip()
+
+        if raw_urls:
+            urls.extend([u.strip() for u in raw_urls.split(',') if u.strip()])
+        if raw_url:
+            urls.append(raw_url)
+
+        if not urls:
+            urls = ["https://checkin.leaflow.net"]
+
+        # de-duplicate while preserving order
+        deduped = []
+        seen = set()
+        for url in urls:
+            if url not in seen:
+                deduped.append(url)
+                seen.add(url)
+        return deduped
+
+    def _switch_to_new_window(self, old_handles, timeout=10):
+        """Switch to new window if one appears."""
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            handles = self.driver.window_handles
+            if len(handles) > len(old_handles):
+                new_handles = [h for h in handles if h not in old_handles]
+                if new_handles:
+                    self.driver.switch_to.window(new_handles[-1])
+                    return True
+            time.sleep(0.5)
+        return False
+
+    def _switch_to_iframe_with_keywords(self, keywords, timeout=10):
+        """Switch into iframe that contains any keyword text."""
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            for iframe in iframes:
+                matched = False
+                try:
+                    self.driver.switch_to.frame(iframe)
+                    body_text = ""
+                    try:
+                        body_text = self.driver.find_element(By.TAG_NAME, "body").text
+                    except Exception:
+                        pass
+                    if any(keyword in body_text for keyword in keywords):
+                        matched = True
+                        return True
+                except Exception:
+                    pass
+                finally:
+                    if not matched:
+                        self.driver.switch_to.default_content()
+            time.sleep(0.5)
+        return False
+
+    def open_checkin_from_workspaces(self):
+        """Open check-in modal from workspaces page."""
+        try:
+            self.safe_get("https://leaflow.net/workspaces", max_retries=2, wait_between=3)
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            time.sleep(2)
+
+            click_selectors = [
+                "//button[contains(., '签到试用')]",
+                "//button[contains(., '签到')]",
+                "//span[contains(., '签到试用')]/ancestor::button[1]",
+                "//span[contains(., '签到')]/ancestor::button[1]"
+            ]
+
+            target_btn = None
+            for selector in click_selectors:
+                try:
+                    target_btn = self.wait_for_element_clickable(By.XPATH, selector, 8)
+                    if target_btn:
+                        break
+                except Exception:
+                    continue
+
+            if not target_btn:
+                logger.warning("未找到工作空间中的签到入口按钮")
+                return False
+
+            old_handles = set(self.driver.window_handles)
+            target_btn.click()
+
+            # New window/tab
+            if self._switch_to_new_window(old_handles, timeout=8):
+                return True
+
+            # Modal or iframe in the same page
+            modal_keywords = ["每日签到", "签到", "已完成", "已签到"]
+            if self._switch_to_iframe_with_keywords(modal_keywords, timeout=8):
+                return True
+
+            return True
+        except Exception as e:
+            logger.warning(f"打开工作空间签到入口失败: {e}")
+            return False
+
     def _stop_page_load(self):
         try:
             self.driver.execute_script("window.stop();")
@@ -374,6 +492,8 @@ class LeaflowAutoCheckin:
                     "button.checkin-btn",  # 优先使用这个选择器
                     "//button[contains(text(), '立即签到')]",
                     "//button[contains(text(), '已签到')]",
+                    "//button[contains(text(), '已完成')]",
+                    "//*[contains(text(), '今日已签到')]",
                     "//*[contains(text(), '每日签到')]",
                     "//*[contains(text(), '签到')]"
                 ]
@@ -414,7 +534,10 @@ class LeaflowAutoCheckin:
             checkin_selectors = [
                 "button.checkin-btn",
                 "//button[contains(text(), '立即签到')]",
+                "//span[contains(text(), '立即签到')]/ancestor::button[1]",
+                "//*[self::button or self::a or @role='button'][contains(., '立即签到')]",
                 "//button[contains(@class, 'checkin')]",
+                "//button[contains(text(), '签到')]",
                 "button[type='submit']",
                 "button[name='checkin']"
             ]
@@ -431,9 +554,13 @@ class LeaflowAutoCheckin:
                         )
                     
                     if checkin_btn.is_displayed():
+                        try:
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", checkin_btn)
+                        except Exception:
+                            pass
                         # 检查按钮文本，如果包含"已签到"则说明今天已经签到过了
                         btn_text = checkin_btn.text.strip()
-                        if "已签到" in btn_text:
+                        if "已签到" in btn_text or "已完成" in btn_text:
                             logger.info("伙计，今日你已经签到过了！")
                             return "already_checked_in"
                         
@@ -460,28 +587,67 @@ class LeaflowAutoCheckin:
     def checkin(self):
         """执行签到流程"""
         logger.info("跳转到签到页面...")
-        
-        # 跳转到签到页面
-        self.safe_get("https://checkin.leaflow.net", max_retries=2, wait_between=3)
-        
-        # 等待签到页面加载（最多重试3次，每次等待20秒）
-        if not self.wait_for_checkin_page_loaded(max_retries=3, wait_time=20):
-            raise Exception("签到页面加载失败，无法找到签到相关元素")
-        
-        # 查找并点击立即签到按钮
-        checkin_result = self.find_and_click_checkin_button()
-        
-        if checkin_result == "already_checked_in":
-            return "今日已签到"
-        elif checkin_result is True:
-            logger.info("已点击立即签到按钮")
-            time.sleep(5)  # 等待签到结果
-            
-            # 获取签到结果
-            result_message = self.get_checkin_result()
-            return result_message
-        else:
-            raise Exception("找不到立即签到按钮或按钮不可点击")
+
+        def try_checkin_on_current_page():
+            try:
+                # 等待签到页面加载（最多重试3次，每次等待20秒）
+                if not self.wait_for_checkin_page_loaded(max_retries=3, wait_time=20):
+                    return False, "checkin elements not found"
+
+                # 查找并点击立即签到按钮
+                checkin_result = self.find_and_click_checkin_button()
+
+                if checkin_result == "already_checked_in":
+                    return True, "今日已签到"
+                if checkin_result is True:
+                    logger.info("已点击立即签到按钮")
+                    time.sleep(5)  # 等待签到结果
+                    result_message = self.get_checkin_result()
+                    return True, result_message
+                return False, "checkin button not found or not clickable"
+            finally:
+                try:
+                    self.driver.switch_to.default_content()
+                except Exception:
+                    pass
+
+        errors = []
+
+        for url in self.checkin_urls:
+            try:
+                self.safe_get(url, max_retries=2, wait_between=3)
+                ok, message = try_checkin_on_current_page()
+                if ok:
+                    return message
+                errors.append(f"{url}: {message}")
+            except Exception as e:
+                errors.append(f"{url}: {str(e)}")
+
+        # Try from workspaces modal
+        try:
+            if self.open_checkin_from_workspaces():
+                ok, message = try_checkin_on_current_page()
+                if ok:
+                    return message
+                errors.append(f"workspaces: {message}")
+            else:
+                errors.append("workspaces: failed to open checkin modal")
+        except Exception as e:
+            errors.append(f"workspaces: {str(e)}")
+
+        # Fallback: try dashboard if not already in list
+        dashboard_url = "https://leaflow.net/dashboard"
+        if dashboard_url not in self.checkin_urls:
+            try:
+                self.safe_get(dashboard_url, max_retries=1, wait_between=2)
+                ok, message = try_checkin_on_current_page()
+                if ok:
+                    return message
+                errors.append(f"{dashboard_url}: {message}")
+            except Exception as e:
+                errors.append(f"{dashboard_url}: {str(e)}")
+
+        raise Exception("Checkin failed. " + " | ".join(errors))
     
     def get_checkin_result(self):
         """获取签到结果消息"""
