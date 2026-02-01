@@ -30,15 +30,15 @@ jobs:
         
     - name: Run auto checkin
       env:
-      LEAFLOW_ACCOUNTS: ${{ secrets.LEAFLOW_ACCOUNTS }}
-      LEAFLOW_EMAIL: ${{ secrets.LEAFLOW_EMAIL }}
-      LEAFLOW_PASSWORD: ${{ secrets.LEAFLOW_PASSWORD }}
-      LEAFLOW_COOKIE: ${{ secrets.LEAFLOW_COOKIE }}
-      LEAFLOW_CHECKIN_URL: ${{ secrets.LEAFLOW_CHECKIN_URL }}
-      LEAFLOW_CHECKIN_URLS: ${{ secrets.LEAFLOW_CHECKIN_URLS }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      GITHUB_ACTIONS: true
-      PYTHONIOENCODING: utf-8
+        LEAFLOW_ACCOUNTS: ${{ secrets.LEAFLOW_ACCOUNTS }}
+        LEAFLOW_EMAIL: ${{ secrets.LEAFLOW_EMAIL }}
+        LEAFLOW_PASSWORD: ${{ secrets.LEAFLOW_PASSWORD }}
+        LEAFLOW_COOKIE: ${{ secrets.LEAFLOW_COOKIE }}
+        LEAFLOW_CHECKIN_URL: ${{ secrets.LEAFLOW_CHECKIN_URL }}
+        LEAFLOW_CHECKIN_URLS: ${{ secrets.LEAFLOW_CHECKIN_URLS }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        GITHUB_ACTIONS: true
+        PYTHONIOENCODING: utf-8
       run: |
         python leaflow_checkin.py

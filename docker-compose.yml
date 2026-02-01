@@ -1,11 +1,16 @@
 version: '3.8'
 
 services:
-  leaflow-checkin:
+yml  leaflow-checkin:
+    image: leaflow-auto-checkin:latest
     build: .
     environment:
       - LEAFLOW_ACCOUNTS=${LEAFLOW_ACCOUNTS}
+      - LEAFLOW_EMAIL=${LEAFLOW_EMAIL}
+      - LEAFLOW_PASSWORD=${LEAFLOW_PASSWORD}
       - LEAFLOW_COOKIE=${LEAFLOW_COOKIE}
+      - LEAFLOW_CHECKIN_URL=${LEAFLOW_CHECKIN_URL}
+      - LEAFLOW_CHECKIN_URLS=${LEAFLOW_CHECKIN_URLS}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
     restart: "no"

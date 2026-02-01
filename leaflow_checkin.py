@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 
 def _ensure_utf8_output():
     try:
+        # Check if running on Windows
+        if sys.platform == 'win32':
+            # Try to set console code page to UTF-8 (65001)
+            import ctypes
+            try:
+                kernel32 = ctypes.windll.kernel32
+                kernel32.SetConsoleOutputCP(65001)
+            except Exception:
+                pass
+        
+        # Reconfigure stdout/stderr to use utf-8
         sys.stdout.reconfigure(encoding='utf-8')
         sys.stderr.reconfigure(encoding='utf-8')
     except Exception:

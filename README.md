@@ -63,6 +63,68 @@
 
 此后，脚本将在每天 UTC 时间 01:15（北京时间 09:15）自动运行。
 
+## 账号配置（单/多账号）
+
+支持两种配置方式：
+
+**多账号（推荐）**
+- 使用 `LEAFLOW_ACCOUNTS`，格式：`邮箱1:密码1,邮箱2:密码2`
+
+**单账号**
+- 使用 `LEAFLOW_EMAIL` + `LEAFLOW_PASSWORD`
+
+说明：两种方式任选其一即可，优先使用 `LEAFLOW_ACCOUNTS`。
+
+## Docker 部署（推荐）
+
+构建镜像（支持语义化 tag，例如 1.0.0）：
+```bash
+docker build -t leaflow-auto-checkin:latest -t leaflow-auto-checkin:1.0.0 .
+```
+
+Cookie 登录运行示例（推荐）：
+```bash
+docker run --rm \
+  -e LEAFLOW_COOKIE="remember_web_xxx=...; session=..." \
+  -e LEAFLOW_CHECKIN_URLS="https://leaflow.net/workspaces,https://checkin.leaflow.net" \
+  leaflow-auto-checkin:latest
+```
+
+多账号运行示例：
+```bash
+docker run --rm \
+  -e LEAFLOW_ACCOUNTS="email1:password1,email2:password2" \
+  -e LEAFLOW_CHECKIN_URLS="https://leaflow.net/workspaces,https://checkin.leaflow.net" \
+  -e TELEGRAM_BOT_TOKEN="xxx" \
+  -e TELEGRAM_CHAT_ID="xxx" \
+  leaflow-auto-checkin:latest
+```
+
+单账号运行示例：
+```bash
+docker run --rm \
+  -e LEAFLOW_EMAIL="email@example.com" \
+  -e LEAFLOW_PASSWORD="password" \
+  -e LEAFLOW_CHECKIN_URLS="https://leaflow.net/workspaces,https://checkin.leaflow.net" \
+  leaflow-auto-checkin:latest
+```
+
+使用 docker compose：
+```bash
+docker compose up --build
+```
+
+## 可视化面板（可选）
+
+如果你希望有可视化后台/多账号管理面板，可以参考下列项目：
+- eraycc/leaflow-auto（Web 控制台）
+- stsix/leaflow-auto-beta（上游参考）
+
+链接：
+```text
+https://github.com/eraycc/leaflow-auto
+https://github.com/stsix/leaflow-auto-beta
+```
 
 ## Fork 后如何更新
 
@@ -83,6 +145,7 @@ git push origin main
 ```
 如你的默认分支是 master，请把 main 替换为 master。
 如果出现冲突，请按提示解决后再推送。
+
 
 ## 💻 本地运行指南
 
@@ -136,3 +199,5 @@ git push origin main
 - 本脚本仅用于学习和技术交流，请勿用于非法用途。
 - 使用本脚本所造成的任何后果由使用者自行承担。
 - 请勿滥用此脚本，以免对目标网站造成不必要的负担。
+
+
