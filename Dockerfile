@@ -29,10 +29,10 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONIOENCODING=utf-8
-ENV PORT=8080
+ENV PORT=80
 
 # Expose port
-EXPOSE 8080
+EXPOSE 80
 
 # Run the FastAPI app with python to use PORT env var
 CMD ["python", "web/app.py"]
