@@ -22,6 +22,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 async def lifespan(app: FastAPI):
     # Startup logic
     print("Executing startup tasks...")
+    print(f"DEBUG: Environment variables: PORT={os.getenv('PORT')}, GITHUB_ACTIONS={os.getenv('GITHUB_ACTIONS')}, RUNNING_IN_DOCKER={os.getenv('RUNNING_IN_DOCKER')}")
     _init_db()
     _sync_env_accounts()
     yield

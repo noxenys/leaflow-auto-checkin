@@ -65,6 +65,8 @@ class LeaflowAutoCheckin:
     
     def setup_driver(self):
         """设置Chrome驱动选项"""
+        logger.info(f"Checking environment: GITHUB_ACTIONS={os.getenv('GITHUB_ACTIONS')}, RUNNING_IN_DOCKER={os.getenv('RUNNING_IN_DOCKER')}")
+        
         chrome_options = Options()
         # Reduce page-load blocking in CI.
         chrome_options.page_load_strategy = "eager"
@@ -74,15 +76,22 @@ class LeaflowAutoCheckin:
         
         # GitHub Actions或Docker环境配置
         if os.getenv('GITHUB_ACTIONS') or os.getenv('RUNNING_IN_DOCKER'):
+            logger.info("Running in headless mode (CI/Docker)")
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
             
-            # 在GitHub Actions环境中使用webdriver-manager自动管理ChromeDriver
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # 在GitHub Actions或Docker环境中使用webdriver-manager自动管理ChromeDriver
+            try:
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                logger.info("ChromeDriver initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize ChromeDriver: {e}")
+                # Try fallback to system installed chromedriver if available (rarely needed if manager works)
+                raise
         else:
             # 本地环境配置
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
