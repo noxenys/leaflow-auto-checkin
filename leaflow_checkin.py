@@ -1,11 +1,5 @@
-#!/usr/bin/env python3
-"""
-Leaflow 多账号自动签到脚本
-变量名：LEAFLOW_ACCOUNTS
-变量值：邮箱1:密码1,邮箱2:密码2,邮箱3:密码3
-"""
-
 import os
+import re
 import sys
 import time
 import logging
@@ -30,17 +24,13 @@ logger = logging.getLogger(__name__)
 
 def _ensure_utf8_output():
     try:
-        # Check if running on Windows
         if sys.platform == 'win32':
-            # Try to set console code page to UTF-8 (65001)
             import ctypes
             try:
                 kernel32 = ctypes.windll.kernel32
                 kernel32.SetConsoleOutputCP(65001)
             except Exception:
                 pass
-        
-        # Reconfigure stdout/stderr to use utf-8
         sys.stdout.reconfigure(encoding='utf-8')
         sys.stderr.reconfigure(encoding='utf-8')
     except Exception:
@@ -61,19 +51,15 @@ class LeaflowAutoCheckin:
         
         self.driver = None
         self.setup_driver()
-    
+
     def setup_driver(self):
         """设置Chrome驱动选项"""
         logger.info(f"Checking environment: GITHUB_ACTIONS={os.getenv('GITHUB_ACTIONS')}, RUNNING_IN_DOCKER={os.getenv('RUNNING_IN_DOCKER')}")
         
         chrome_options = Options()
-        # Reduce page-load blocking in CI.
         chrome_options.page_load_strategy = "eager"
-        
-        # 通用防检测配置
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
-        # GitHub Actions或Docker环境配置
         if os.getenv('GITHUB_ACTIONS') or os.getenv('RUNNING_IN_DOCKER'):
             logger.info("Running in headless mode (CI/Docker)")
             chrome_options.add_argument('--headless=new')
@@ -82,9 +68,7 @@ class LeaflowAutoCheckin:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
             
-            # 在GitHub Actions或Docker环境中使用webdriver-manager自动管理ChromeDriver
             try:
-                # 优先使用环境变量指定的 ChromeDriver (如 Docker 内置的)
                 system_chromedriver = os.getenv('CHROMEDRIVER_PATH')
                 system_chrome_bin = os.getenv('CHROME_BIN')
 
@@ -103,10 +87,14 @@ class LeaflowAutoCheckin:
                 logger.info("ChromeDriver initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize ChromeDriver: {e}")
-                # Try fallback to system installed chromedriver if available (rarely needed if manager works)
                 raise
         else:
-            # 本地环境配置
+            # 兼容沙盒环境，即使是非CI/Docker环境也使用headless和no-sandbox
+            chrome_options.add_argument('--headless=new')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -135,7 +123,6 @@ class LeaflowAutoCheckin:
         if not urls:
             urls = ["https://checkin.leaflow.net"]
 
-        # de-duplicate while preserving order
         deduped = []
         seen = set()
         for url in urls:
@@ -235,6 +222,11 @@ class LeaflowAutoCheckin:
             if (node.nodeType === 1) { // ELEMENT_NODE
               out.push(node);
               if (node.shadowRoot) queue.push(node.shadowRoot);
+              if (node.tagName && node.tagName.toLowerCase() === 'iframe') {
+                try {
+                  if (node.contentDocument) queue.push(node.contentDocument);
+                } catch (e) {}
+              }
               if (node.children) {
                 for (const child of node.children) queue.push(child);
               }
@@ -248,27 +240,26 @@ class LeaflowAutoCheckin:
           }
           return out;
         }
-        const nodes = iterNodes(document);
-        for (const el of nodes) {
-          if (!isVisible(el)) continue;
-          const text = (el.innerText || el.textContent || '').trim();
-          if (!text) continue;
-          for (const t of texts) {
-            if (text.includes(t)) {
-              const target = closestClickable(el);
-              try {
-                target.scrollIntoView({block: 'center'});
-              } catch (e) {}
-              try {
-                target.click();
-              } catch (e) {
-                try { target.dispatchEvent(new MouseEvent('click', {bubbles: true})); } catch (e2) {}
+        function tryClick(doc) {
+          const nodes = iterNodes(doc);
+          for (const el of nodes) {
+            if (!isVisible(el)) continue;
+            const text = (el.innerText || el.textContent || '').trim();
+            if (!text) continue;
+            for (const t of texts) {
+              if (text === t || (text.includes(t) && text.length < t.length + 10)) {
+                const target = closestClickable(el);
+                try { target.scrollIntoView({block: 'center'}); } catch (e) {}
+                try { target.click(); } catch (e) {
+                  target.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                }
+                return true;
               }
-              return true;
             }
           }
+          return false;
         }
-        return false;
+        return tryClick(document);
         """
         end_time = time.time() + timeout
         while time.time() < end_time:
@@ -313,7 +304,6 @@ class LeaflowAutoCheckin:
                         elements = self.driver.find_elements(By.XPATH, selector)
                         for element in elements:
                             if element.is_displayed():
-                                # 优先点击更具体的元素（如 button），如果是纯文本容器，尝试点击其父级
                                 target_btn = element
                                 break
                         if target_btn:
@@ -346,19 +336,15 @@ class LeaflowAutoCheckin:
             # 点击后，等待“立即签到”按钮出现作为成功标志
             logger.info("已点击签到入口，等待签到弹窗...")
             
-            # 1. Check for New window/tab
             if self._switch_to_new_window(old_handles, timeout=5):
                 logger.info("检测到新窗口")
                 return True
 
-            # 2. Check current page or iframes for "立即签到" button
             checkin_btn_keywords = ["立即签到", "签到"]
             end_time = time.time() + 10
             while time.time() < end_time:
-                # Check current DOM
                 for keyword in checkin_btn_keywords:
                     try:
-                        # 查找包含关键字的按钮
                         xpath = f"//button[contains(., '{keyword}')] | //*[contains(text(), '{keyword}') and @role='button']"
                         btns = self.driver.find_elements(By.XPATH, xpath)
                         for btn in btns:
@@ -368,7 +354,6 @@ class LeaflowAutoCheckin:
                     except:
                         pass
                 
-                # Check iframes
                 if self._switch_to_iframe_with_keywords(checkin_btn_keywords, timeout=1):
                     logger.info("在 iframe 中找到签到弹窗")
                     return True
@@ -376,7 +361,7 @@ class LeaflowAutoCheckin:
                 time.sleep(1)
 
             logger.warning("点击签到入口后，未在限定时间内检测到签到弹窗或按钮")
-            return False # 如果没找到“立即签到”按钮，说明打开失败
+            return False
         except Exception as e:
             logger.warning(f"打开工作空间签到入口失败: {e}")
             return False
@@ -431,7 +416,6 @@ class LeaflowAutoCheckin:
             logger.info("尝试关闭初始弹窗...")
             time.sleep(3)  # 等待弹窗加载
             
-            # 尝试关闭弹窗
             try:
                 actions = ActionChains(self.driver)
                 actions.move_by_offset(10, 10).click().perform()
@@ -460,22 +444,18 @@ class LeaflowAutoCheckin:
     
     def login(self):
         """执行登录流程，支持重试机制"""
-        # 尝试使用 Cookie 登录（如果提供了）
         cookie_str = os.getenv('LEAFLOW_COOKIE')
         if cookie_str:
             try:
                 logger.info("检测到 LEAFLOW_COOKIE，尝试通过 Cookie 登录...")
-                # 先访问域名以设置 Cookie
                 self.driver.get("https://leaflow.net")
                 time.sleep(2)
                 
-                # 解析 Cookie 字符串 (key=value; key2=value2)
                 for item in cookie_str.split(';'):
                     if '=' in item:
                         name, value = item.strip().split('=', 1)
                         self.driver.add_cookie({'name': name, 'value': value})
                 
-                # 刷新页面验证登录
                 self.driver.refresh()
                 time.sleep(5)
                 
@@ -493,27 +473,19 @@ class LeaflowAutoCheckin:
             try:
                 logger.info(f"开始登录流程，第 {attempt + 1}/{max_retries} 次尝试...")
                 
-                # 访问登录页面
                 self.driver.get("https://leaflow.net/login")
                 
-                # 显式等待页面完全加载，防止在白屏阶段就开始查找元素
                 WebDriverWait(self.driver, 40).until(
                     EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
                 
                 time.sleep(5)
         
-                # 关闭弹窗
                 self.close_popup()
                 
-                # 输入邮箱
                 try:
                     logger.info("查找邮箱输入框...")
-                    
-                    # 等待页面稳定
                     time.sleep(2)
-                    
-                    # 尝试多种选择器找到邮箱输入框
                     email_selectors = [
                         "input[type='text']",
                         "input[type='email']", 
@@ -536,7 +508,6 @@ class LeaflowAutoCheckin:
                     if not email_input:
                         raise Exception("找不到邮箱输入框")
                     
-                    # 清除并输入邮箱
                     email_input.clear()
                     email_input.send_keys(self.email)
                     logger.info("邮箱输入完成")
@@ -544,7 +515,6 @@ class LeaflowAutoCheckin:
                     
                 except Exception as e:
                     logger.error(f"输入邮箱时出错: {e}")
-                    # 尝试使用JavaScript直接设置值
                     try:
                         self.driver.execute_script(f"document.querySelector('input[type=\"text\"], input[type=\"email\"]').value = '{self.email}';")
                         logger.info("通过JavaScript设置邮箱")
@@ -552,11 +522,8 @@ class LeaflowAutoCheckin:
                     except:
                         raise Exception(f"无法输入邮箱: {e}")
                 
-                # 等待密码输入框出现并输入密码
                 try:
                     logger.info("查找密码输入框...")
-                    
-                    # 等待密码框出现
                     password_input = self.wait_for_element_clickable(
                         By.CSS_SELECTOR, "input[type='password']", 10
                     )
@@ -569,7 +536,18 @@ class LeaflowAutoCheckin:
                 except TimeoutException:
                     raise Exception("找不到密码输入框")
                 
-                # 点击登录按钮
+                # 检查 reCAPTCHA 徽标是否存在
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, ".grecaptcha-badge"))
+                    )
+                    logger.info("检测到 reCAPTCHA 徽标，等待其处理...")
+                    time.sleep(5) # 给 reCAPTCHA 留出处理时间
+                except TimeoutException:
+                    logger.info("未检测到 reCAPTCHA 徽标")
+                except Exception as e:
+                    logger.warning(f"检查 reCAPTCHA 徽标时出错: {e}")
+
                 try:
                     logger.info("查找登录按钮...")
                     login_btn_selectors = [
@@ -599,15 +577,14 @@ class LeaflowAutoCheckin:
                     logger.info("已点击登录按钮")
                     
                 except Exception as e:
+                    logger.error(f"点击登录按钮失败: {e}")
                     raise Exception(f"点击登录按钮失败: {e}")
                 
-                # 等待登录完成 - 延长超时时间到40秒，给Cloudflare的5秒盾留出更多通过时间
                 try:
                     WebDriverWait(self.driver, 40).until(
                         lambda driver: "dashboard" in driver.current_url or "workspaces" in driver.current_url or "login" not in driver.current_url
                     )
                     
-                    # 检查当前URL确认登录成功
                     current_url = self.driver.current_url
                     if "dashboard" in current_url or "workspaces" in current_url or "login" not in current_url:
                         logger.info(f"登录成功，当前URL: {current_url}")
@@ -616,16 +593,23 @@ class LeaflowAutoCheckin:
                         raise Exception("登录后未跳转到正确页面")
                         
                 except TimeoutException:
-                    # 检查是否登录失败
                     try:
-                        error_selectors = [".error", ".alert-danger", "[class*='error']", "[class*='danger']"]
+                        error_selectors = [".error", ".alert-danger", "[class*='error']", "[class*='danger']", ".ant-notification-notice-message"]
                         for selector in error_selectors:
                             try:
-                                error_msg = self.driver.find_element(By.CSS_SELECTOR, selector)
-                                if error_msg.is_displayed():
-                                    raise Exception(f"登录失败: {error_msg.text}")
+                                error_msg_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                                if error_msg_element.is_displayed():
+                                    error_text = error_msg_element.text
+                                    if error_text:
+                                        raise Exception(f"登录失败: {error_text}")
                             except:
                                 continue
+                        # 尝试从页面源码中查找错误信息
+                        page_source = self.driver.page_source
+                        if "账号或密码错误" in page_source or "无效的凭据" in page_source:
+                            raise Exception("登录失败: 账号或密码错误/无效凭据")
+                        if "验证码" in page_source:
+                            raise Exception("登录失败: 遇到验证码")
                         raise Exception("登录超时，无法确认登录状态")
                     except Exception as e:
                         raise e
@@ -633,14 +617,12 @@ class LeaflowAutoCheckin:
             except Exception as e:
                 logger.warning(f"第 {attempt + 1} 次登录尝试失败: {e}")
                 
-                # 如果不是最后一次尝试，刷新页面并等待后重试
                 if attempt < max_retries - 1:
                     logger.info(f"正在进行第 {attempt + 2} 次重试...")
                     self.driver.refresh()
                     time.sleep(5)
                     continue
                 else:
-                    # 最后一次尝试失败，抛出异常
                     raise Exception(f"登录失败，已尝试 {max_retries} 次: {e}")
         
         return False
@@ -650,22 +632,18 @@ class LeaflowAutoCheckin:
         try:
             logger.info("获取账号余额...")
             
-            # 跳转到仪表板页面
             self.driver.get("https://leaflow.net/dashboard")
             time.sleep(3)
             
-            # 等待页面加载
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             
-            # 尝试多种选择器查找余额元素
             balance_selectors = [
-                "//*[contains(text(), '¥') or contains(text(), '￥') or contains(text(), '元')]",
+                "//div[contains(@class, 'flex') and contains(., '余额')]//span",
                 "//*[contains(@class, 'balance')]",
-                "//*[contains(@class, 'money')]",
-                "//*[contains(@class, 'amount')]",
-                "//button[contains(@class, 'dollar')]",
+                "//*[contains(text(), '¥') or contains(text(), '￥') or contains(text(), '元')]",
+                "//button[contains(., '余额')]//span",
                 "//span[contains(@class, 'font-medium')]"
             ]
             
@@ -674,11 +652,10 @@ class LeaflowAutoCheckin:
                     elements = self.driver.find_elements(By.XPATH, selector)
                     for element in elements:
                         text = element.text.strip()
-                        # 查找包含数字和货币符号的文本
                         if any(char.isdigit() for char in text) and ('¥' in text or '￥' in text or '元' in text):
-                            # 提取数字部分
-                            import re
-                            numbers = re.findall(r'\d+\.?\d*', text)
+                            # 提取数字，支持带逗号的千分位
+                            clean_text = text.replace(',', '')
+                            numbers = re.findall(r'\d+\.?\d*', clean_text)
                             if numbers:
                                 balance = numbers[0]
                                 logger.info(f"找到余额: {balance}元")
@@ -700,9 +677,8 @@ class LeaflowAutoCheckin:
             time.sleep(wait_time)
             
             try:
-                # 检查页面是否包含签到相关元素
                 checkin_indicators = [
-                    "button.checkin-btn",  # 优先使用这个选择器
+                    "button.checkin-btn",
                     "//button[contains(text(), '立即签到')]",
                     "//button[contains(text(), '已签到')]",
                     "//button[contains(text(), '已完成')]",
@@ -740,57 +716,194 @@ class LeaflowAutoCheckin:
         logger.info("正在查找并点击'立即签到'按钮...")
         
         try:
-            # 先等待页面可能的重载
             time.sleep(2)
             
-            # 扩展选择器列表，包含更多前端框架的按钮样式
-            checkin_selectors = [
-                "button.checkin-btn",
+            # 尝试处理 iframe 情况
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            if iframes:
+                logger.info(f"检测到 {len(iframes)} 个 iframe，尝试在 iframe 中查找按钮")
+                for i, frame in enumerate(iframes):
+                    try:
+                        self.driver.switch_to.frame(frame)
+                        logger.info(f"已切换到第 {i+1} 个 iframe")
+                        # 在 iframe 中尝试物理点击 + JS 混合模式
+                        logger.info("尝试在 iframe 中定位'立即签到'按钮...")
+                        try:
+                            # 1. 尝试 JS 智能定位
+                            script = """
+                            const texts = ['立即签到', '签到'];
+                            const nodes = document.querySelectorAll('button, div[role="button"], a[role="button"], .ant-btn');
+                            for (const el of nodes) {
+                                const text = (el.innerText || '').trim();
+                                if (texts.some(t => text.includes(t))) return el;
+                            }
+                            return null;
+                            """
+                            btn = self.driver.execute_script(script)
+                            if btn:
+                                logger.info("在 iframe 内部找到按钮，开始物理轰炸...")
+                                # 执行 ActionChains 物理点击
+                                actions = ActionChains(self.driver)
+                                actions.move_to_element(btn).click().perform()
+                                time.sleep(0.5)
+                                # 补一个 JS 点击
+                                self.driver.execute_script("arguments[0].click();", btn)
+                                logger.info("iframe 内部物理+JS点击指令已发出")
+                                self.driver.switch_to.default_content()
+                                return True
+                        except Exception as fe:
+                            logger.warning(f"iframe 内部点击尝试失败: {fe}")
+                        
+                        self.driver.switch_to.default_content()
+                    except Exception as e:
+                        logger.warning(f"处理 iframe {i+1} 时出错: {e}")
+                        self.driver.switch_to.default_content()
+
+            priority_selectors = [
                 "//button[contains(., '立即签到')]",
+                "//div[@role='button' and contains(., '立即签到')]",
+                "//*[contains(@class, 'ant-btn') and contains(., '立即签到')]",
+                "//*[contains(text(), '立即签到')]",
+            ]
+            
+            secondary_selectors = [
+                "button.checkin-btn",
                 "//button[contains(., '签到')]",
-                "//*[contains(@class, 'ant-btn') and contains(., '签到')]",  # Ant Design
-                "//*[contains(@class, 'el-button') and contains(., '签到')]", # Element UI
-                "//*[contains(@class, 'MuiButton') and contains(., '签到')]", # Material UI
+                "//*[contains(@class, 'ant-btn') and contains(., '签到')]",
+                "//*[contains(@class, 'el-button') and contains(., '签到')]",
+                "//*[contains(@class, 'MuiButton') and contains(., '签到')]",
                 "//div[@role='button' and contains(., '签到')]",
                 "//a[@role='button' and contains(., '签到')]",
-                "//*[text()='立即签到']",
                 "//*[text()='签到']"
             ]
             
-            # 1. 尝试常规选择器
+            checkin_selectors = priority_selectors + secondary_selectors
+            
             for selector in checkin_selectors:
                 try:
                     if selector.startswith("//"):
-                        # 使用 shorter timeout for each selector to iterate faster
                         elements = self.driver.find_elements(By.XPATH, selector)
                     else:
                         elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     
                     for checkin_btn in elements:
                         if checkin_btn.is_displayed() and checkin_btn.is_enabled():
-                            # 再次确认文本，避免误点
                             btn_text = checkin_btn.text.strip()
+                            try:
+                                btn_html = checkin_btn.get_attribute('outerHTML')
+                                if len(btn_html) > 100:
+                                    btn_html = btn_html[:100] + "..."
+                            except:
+                                btn_html = "N/A"
+                                
                             if "已签到" in btn_text or "已完成" in btn_text:
-                                logger.info("检测到按钮文本包含'已签到'，跳过点击")
+                                logger.info(f"检测到按钮文本包含'已签到' ({btn_text})，跳过点击")
                                 return "already_checked_in"
+                            
+                            if "试用" in btn_text:
+                                logger.info(f"跳过疑似菜单项: {btn_text}")
+                                continue
 
-                            logger.info(f"找到签到按钮 (Text: {btn_text})，尝试点击...")
+                            logger.info(f"找到签到按钮 (Text: {btn_text}, Selector: {selector})，尝试点击...")
+                            
                             try:
                                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", checkin_btn)
-                                time.sleep(0.5)
+                                time.sleep(1)
                             except:
                                 pass
                             
-                            checkin_btn.click()
-                            logger.info("已触发点击操作")
+                            # 点击前截图
+                            self.driver.save_screenshot("before_click.png")
+                            logger.info("已保存点击前截图: before_click.png")
+
+                            try:
+                                # 获取元素位置和大小
+                                location = checkin_btn.location
+                                size = checkin_btn.size
+                                logger.info(f"按钮物理位置: {location}, 大小: {size}")
+                                
+                                # 方案 A: 物理中心点点击
+                                actions = ActionChains(self.driver)
+                                actions.move_to_element(checkin_btn).click().perform()
+                                logger.info("已执行中心点物理模拟点击")
+                                time.sleep(1)
+                                
+                                # 方案 B: 多点偏移轰炸 (针对可能的遮挡或特殊监听)
+                                offsets = [(0, 0), (5, 5), (-5, -5), (10, 0), (0, 10)]
+                                for ox, oy in offsets:
+                                    try:
+                                        actions = ActionChains(self.driver)
+                                        actions.move_to_element_with_offset(checkin_btn, ox, oy).click().perform()
+                                        logger.info(f"已执行偏移点击: ({ox}, {oy})")
+                                        time.sleep(0.5)
+                                    except:
+                                        continue
+                                        
+                                # 方案 C: 强制 JS 派发事件
+                                self.driver.execute_script("""
+                                    var el = arguments[0];
+                                    ['mousedown', 'mouseup', 'click'].forEach(type => {
+                                        var ev = new MouseEvent(type, {
+                                            view: window,
+                                            bubbles: true,
+                                            cancelable: true,
+                                            buttons: 1
+                                        });
+                                        el.dispatchEvent(ev);
+                                    });
+                                """, checkin_btn)
+                                logger.info("已执行全套 JS 事件派发")
+                                
+                            except Exception as e:
+                                logger.warning(f"综合点击尝试出错: {e}")
+                                try:
+                                    self.driver.execute_script("arguments[0].click();", checkin_btn)
+                                except:
+                                    pass
+                            
+                            # 点击瞬间截图
+                            time.sleep(0.5)
+                            self.driver.save_screenshot("after_click_instant.png")
+                            logger.info("已保存点击瞬间截图: after_click_instant.png")
+
+                             # 验证点击结果 - 增加循环检查奖励弹窗
+                            logger.info("循环检查奖励领取弹窗...")
+                            for _ in range(5):
+                                reward_btn_texts = ["领取", "确定", "我知道了", "收下", "Confirm", "OK"]
+                                if self._js_click_by_text(reward_btn_texts, timeout=2):
+                                    logger.info("成功点击奖励领取/确认按钮")
+                                    break
+                                time.sleep(1)
+                            
+                            time.sleep(2)
+                            
+                            # 尝试处理可能出现的“领取”或“确定”按钮
+                            logger.info("检查是否有奖励领取弹窗...")
+                            reward_btn_texts = ["领取", "确定", "我知道了", "收下", "Confirm", "OK"]
+                            if self._js_click_by_text(reward_btn_texts, timeout=5):
+                                logger.info("已点击奖励领取/确认按钮")
+                                time.sleep(2)
+                            
+                            try:
+                                if not checkin_btn.is_displayed():
+                                    logger.info("点击后签到按钮消失，判定为点击成功")
+                                    return True
+                                
+                                new_text = checkin_btn.text.strip()
+                                if new_text != btn_text or "已" in new_text:
+                                    logger.info(f"点击后按钮文本变为: {new_text}，判定为点击成功")
+                                    return True
+                            except Exception:
+                                logger.info("点击后元素状态改变，判定为点击成功")
+                                return True
+                                
                             return True
                 except Exception:
                     continue
             
-            # 2. 如果常规选择器失败，使用 JS 模糊搜索点击 (穿透 Shadow DOM)
             logger.info("常规选择器未找到，尝试 JS 智能搜索点击...")
-            js_keywords = ["立即签到", "签到", "Check in"]
-            if self._js_click_by_text(js_keywords, timeout=5):
+            js_fallback_texts = ["立即签到", "签到"]
+            if self._js_click_by_text(js_fallback_texts, timeout=8):
                 logger.info("JS 点击成功")
                 return True
 
@@ -805,7 +918,6 @@ class LeaflowAutoCheckin:
         """执行签到流程"""
         logger.info("开始签到流程...")
 
-        # 优先尝试通过主站工作空间弹窗签到（目前最稳定）
         logger.info("尝试方案1：主站工作空间弹窗签到")
         if self.open_checkin_from_workspaces():
             logger.info("成功打开签到弹窗，准备点击'立即签到'...")
@@ -815,14 +927,12 @@ class LeaflowAutoCheckin:
         else:
             logger.warning("方案1失败，尝试备选方案")
 
-        # 备选方案：直接访问签到 URL
         logger.info("尝试方案2：直接访问签到 URL")
         for url in self.checkin_urls:
             try:
                 logger.info(f"正在访问签到地址: {url}")
                 self.safe_get(url, max_retries=1, wait_between=3)
                 
-                # 等待签到页面加载（最多重试2次，每次等待15秒）
                 if self.wait_for_checkin_page_loaded(max_retries=2, wait_time=15):
                     checkin_result = self.find_and_click_checkin_button()
                     if checkin_result:
@@ -836,23 +946,21 @@ class LeaflowAutoCheckin:
     def get_checkin_result(self):
         """获取签到结果消息"""
         try:
-            # 给页面一些时间显示结果
             time.sleep(3)
             
-            # 尝试查找各种可能的成功消息元素
             success_selectors = [
                 ".alert-success",
                 ".success",
                 ".message",
                 "[class*='success']",
                 "[class*='message']",
-                ".modal-content",  # 弹窗内容
-                ".ant-message",    # Ant Design 消息
-                ".el-message",     # Element UI 消息
-                ".toast",          # Toast消息
-                ".notification",    # 通知
-                "//div[contains(@class, 'ant-message-notice')]//span", # Antd具体文本
-                "//div[contains(@class, 'el-message__content')]"       # Element具体文本
+                ".modal-content",
+                ".ant-message",
+                ".el-message",
+                ".toast",
+                ".notification",
+                "//div[contains(@class, 'ant-message-notice')]//span",
+                "//div[contains(@class, 'el-message__content')]"
             ]
             
             for selector in success_selectors:
@@ -865,17 +973,14 @@ class LeaflowAutoCheckin:
                     for element in elements:
                         if element.is_displayed():
                             text = element.text.strip()
-                            # 过滤掉非结果文本，如“签到”按钮本身的文字
                             if text and "签到" in text and len(text) > 4: 
                                 return text
-                            if "+" in text: # 包含奖励数值
+                            if "+" in text:
                                 return text
                 except:
                     continue
             
-            # 如果没有找到特定元素，检查页面文本
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
-            # 增加对日期格式的匹配 (YYYY-MM-DD)
             import re
             date_pattern = datetime.now().strftime("%Y-%m-%d")
             
@@ -884,19 +989,15 @@ class LeaflowAutoCheckin:
                 line = line.strip()
                 if not line: continue
                 
-                # 匹配签到记录格式：日期 + 金额
                 if date_pattern in line and ("+" in line or "元" in line):
                     return f"签到记录 {line}"
                     
-                # 匹配常见的成功提示
                 if "签到成功" in line or "获得" in line or "恭喜" in line:
-                    if len(line) < 50: # 避免提取无关长文本
+                    if len(line) < 50:
                         return line
             
-            # 检查签到按钮状态变化作为最后的确认
             try:
                 checkin_btn = None
-                # 尝试重新定位按钮
                 btn_selectors = ["button.checkin-btn", "//button[contains(., '已签到')]"]
                 for sel in btn_selectors:
                     try:
@@ -925,12 +1026,8 @@ class LeaflowAutoCheckin:
         try:
             logger.info(f"开始处理账号")
             
-            # 登录
             if self.login():
-                # 签到
                 result = self.checkin()
-                
-                # 获取余额
                 balance = self.get_balance()
                 
                 logger.info(f"签到结果: {result}, 余额: {balance}")
@@ -941,7 +1038,7 @@ class LeaflowAutoCheckin:
         except Exception as e:
             error_msg = f"自动签到失败: {str(e)}"
             if self._is_driver_timeout(str(e)):
-                logger.warning("Browser timeout detected, restarting driver and retrying once...")
+                logger.warning("检测到驱动超时，尝试重启驱动并重试一次...")
                 try:
                     self.restart_driver()
                     if self.login():
@@ -961,10 +1058,12 @@ class LeaflowAutoCheckin:
 class MultiAccountManager:
     """多账号管理器 - 简化配置版本"""
     
-    def __init__(self):
+    def __init__(self, auto_load=True):
         self.telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '')
         self.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', '')
-        self.accounts = self.load_accounts()
+        self.accounts = []
+        if auto_load:
+            self.accounts = self.load_accounts()
     
     def load_accounts(self):
         """从环境变量加载多账号信息，支持冒号分隔多账号和单账号"""
@@ -972,7 +1071,6 @@ class MultiAccountManager:
         
         logger.info("开始加载账号配置...")
         
-        # 方法1: 冒号分隔多账号格式
         accounts_str = os.getenv('LEAFLOW_ACCOUNTS', '').strip()
         if accounts_str:
             try:
@@ -1006,7 +1104,6 @@ class MultiAccountManager:
             except Exception as e:
                 logger.error(f"解析冒号分隔账号配置失败: {e}")
         
-        # 方法2: 单账号格式
         single_email = os.getenv('LEAFLOW_EMAIL', '').strip()
         single_password = os.getenv('LEAFLOW_PASSWORD', '').strip()
         
@@ -1018,7 +1115,6 @@ class MultiAccountManager:
             logger.info("加载了单个账号配置")
             return accounts
         
-        # 如果所有方法都失败
         logger.error("未找到有效的账号配置")
         logger.error("请检查以下环境变量设置:")
         logger.error("1. LEAFLOW_ACCOUNTS: 冒号分隔多账号 (email1:pass1,email2:pass2)")
@@ -1033,32 +1129,29 @@ class MultiAccountManager:
             return
         
         try:
-            # 构建通知消息
             success_count = sum(1 for _, success, _, _ in results if success)
             total_count = len(results)
             current_date = datetime.now().strftime("%Y/%m/%d")
             
-            message = f"🎁 Leaflow自动签到通知\n"
-            message += f"📊 成功: {success_count}/{total_count}\n"
-            message += f"📅 签到时间：{current_date}\n\n"
+            message = f"🎁 Leaflow自动签到通知\\n"
+            message += f"📊 成功: {success_count}/{total_count}\\n"
+            message += f"📅 签到时间：{current_date}\\n\\n"
             
             for email, success, result, balance in results:
-                # 隐藏邮箱部分字符以保护隐私
                 masked_email = email[:3] + "***" + email[email.find("@"):]
                 
-                # 对结果和余额进行HTML转义，防止特殊符号导致Telegram API报错
                 escaped_result = html.escape(str(result))
                 escaped_balance = html.escape(str(balance))
                 
                 if success:
                     status = "✅"
-                    message += f"账号：{masked_email}\n"
-                    message += f"{status}  {escaped_result}！\n"
-                    message += f"💰  当前总余额：{escaped_balance}。\n\n"
+                    message += f"账号：{masked_email}\\n"
+                    message += f"{status}  {escaped_result}！\\n"
+                    message += f"💰  当前总余额：{escaped_balance}。\\n\\n"
                 else:
                     status = "❌"
-                    message += f"账号：{masked_email}\n"
-                    message += f"{status}  {escaped_result}\n\n"
+                    message += f"账号：{masked_email}\\n"
+                    message += f"{status}  {escaped_result}\\n\\n"
             
             url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
             data = {
@@ -1090,7 +1183,6 @@ class MultiAccountManager:
                 success, result, balance = auto_checkin.run()
                 results.append((account['email'], success, result, balance))
                 
-                # 在账号之间添加间隔，避免请求过于频繁
                 if i < len(self.accounts):
                     wait_time = 5
                     logger.info(f"等待{wait_time}秒后处理下一个账号...")
@@ -1101,10 +1193,8 @@ class MultiAccountManager:
                 logger.error(error_msg)
                 results.append((account['email'], False, error_msg, "未知"))
         
-        # 发送汇总通知
         self.send_notification(results)
         
-        # 返回总体结果
         success_count = sum(1 for _, success, _, _ in results if success)
         return success_count == len(self.accounts), results
 
@@ -1120,7 +1210,6 @@ def main():
         else:
             success_count = sum(1 for _, success, _, _ in detailed_results if success)
             logger.warning(f"⚠️ 部分账号签到失败: {success_count}/{len(detailed_results)} 成功")
-            # 即使有失败，也不退出错误状态，因为可能部分成功
             exit(0)
             
     except Exception as e:

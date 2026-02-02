@@ -23,3 +23,7 @@ venv.bak/
 # Project specific
 skills/
 data/
+test_checkin.py
+*.html
+.editorconfig
+.dockerignore

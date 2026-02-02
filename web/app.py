@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from leaflow_checkin import LeaflowAutoCheckin
+from leaflow_checkin import LeaflowAutoCheckin, MultiAccountManager
 
 DB_PATH = os.getenv("DB_PATH", "./data/leaflow.db")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
@@ -406,6 +406,22 @@ def _perform_checkin_task():
                 conn.close()
 
         print(f"Checkin task completed. Results: {len(results)}")
+        
+        # Send Telegram notification
+        try:
+            print("Sending Telegram notification...")
+            # Convert results to the format expected by MultiAccountManager
+            # app.py results: [{"email":..., "success":..., "result":..., "balance":...}]
+            # MultiAccountManager expects: [(email, success, result, balance)]
+            notify_results = []
+            for item in results:
+                notify_results.append((item["email"], item["success"], item["result"], item["balance"]))
+            
+            manager = MultiAccountManager(auto_load=False)
+            manager.send_notification(notify_results)
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+
         return {"ok": True, "items": results}
     except Exception as e:
         print(f"Checkin task failed with error: {e}")
