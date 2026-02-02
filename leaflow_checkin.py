@@ -923,7 +923,9 @@ class LeaflowAutoCheckin:
             logger.info("成功打开签到弹窗，准备点击'立即签到'...")
             checkin_result = self.find_and_click_checkin_button()
             if checkin_result:
-                return "今日已签到" if checkin_result == "already_checked_in" else True
+                if checkin_result == "already_checked_in":
+                    return "今日已签到"
+                return self.get_checkin_result()
         else:
             logger.warning("方案1失败，尝试备选方案")
 
@@ -936,7 +938,9 @@ class LeaflowAutoCheckin:
                 if self.wait_for_checkin_page_loaded(max_retries=2, wait_time=15):
                     checkin_result = self.find_and_click_checkin_button()
                     if checkin_result:
-                        return "今日已签到" if checkin_result == "already_checked_in" else True
+                        if checkin_result == "already_checked_in":
+                            return "今日已签到"
+                        return self.get_checkin_result()
             except Exception as e:
                 logger.warning(f"访问 {url} 失败: {e}")
                 continue
@@ -1133,9 +1137,9 @@ class MultiAccountManager:
             total_count = len(results)
             current_date = datetime.now().strftime("%Y/%m/%d")
             
-            message = f"🎁 Leaflow自动签到通知\\n"
-            message += f"📊 成功: {success_count}/{total_count}\\n"
-            message += f"📅 签到时间：{current_date}\\n\\n"
+            message = f"🎁 Leaflow自动签到通知\n"
+            message += f"📊 成功: {success_count}/{total_count}\n"
+            message += f"📅 签到时间：{current_date}\n\n"
             
             for email, success, result, balance in results:
                 masked_email = email[:3] + "***" + email[email.find("@"):]
@@ -1145,13 +1149,13 @@ class MultiAccountManager:
                 
                 if success:
                     status = "✅"
-                    message += f"账号：{masked_email}\\n"
-                    message += f"{status}  {escaped_result}！\\n"
-                    message += f"💰  当前总余额：{escaped_balance}。\\n\\n"
+                    message += f"账号：{masked_email}\n"
+                    message += f"{status}  {escaped_result}！\n"
+                    message += f"💰  当前总余额：{escaped_balance}。\n\n"
                 else:
                     status = "❌"
-                    message += f"账号：{masked_email}\\n"
-                    message += f"{status}  {escaped_result}\\n\\n"
+                    message += f"账号：{masked_email}\n"
+                    message += f"{status}  {escaped_result}\n\n"
             
             url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
             data = {
