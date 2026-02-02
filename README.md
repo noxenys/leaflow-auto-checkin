@@ -75,74 +75,6 @@
 
 说明：两种方式任选其一即可，优先使用 `LEAFLOW_ACCOUNTS`。
 
-## Docker 部署（推荐）
-
-构建镜像（支持语义化 tag，例如 1.0.0）：
-```bash
-docker build -t leaflow-auto-checkin:latest .
-```
-
-### Docker 环境变量说明
-
-| 变量名 | 说明 | 默认值 | 必填 |
-|--------|------|--------|------|
-| `LEAFLOW_ACCOUNTS` | 多账号配置 (email:pass,email2:pass2) | 无 | 否 (与 Cookie 二选一) |
-| `LEAFLOW_COOKIE` | Cookie 登录配置 (key=value;...) | 无 | 否 (推荐) |
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | 无 | 否 |
-| `TELEGRAM_CHAT_ID` | Telegram Chat ID | 无 | 否 |
-| `LEAFLOW_CHECKIN_URLS` | 自定义签到地址 (逗号分隔) | 自动探测 | 否 |
-| `DB_PATH` | SQLite 数据库路径 | `/app/data/leaflow.db` | 否 |
-| `ADMIN_TOKEN` | Web 面板访问令牌 (安全验证) | 无 | 否 |
-| `PORT` | Web 服务端口 | `8080` | 否 |
-
-### 运行示例
-
-**方式一：使用 Docker Compose (推荐)**
-```bash
-# 启动服务（包含 Web 面板）
-docker compose up -d
-```
-启动后访问：`http://localhost:8080`
-
-**方式二：使用 Docker Run (仅脚本)**
-
-Cookie 登录运行：
-```bash
-docker run --rm \
-  -e LEAFLOW_COOKIE="remember_web_xxx=...; session=..." \
-  leaflow-auto-checkin:latest \
-  python leaflow_checkin.py
-```
-
-多账号运行：
-```bash
-docker run --rm \
-  -e LEAFLOW_ACCOUNTS="email1:password1,email2:password2" \
-  -e TELEGRAM_BOT_TOKEN="xxx" \
-  -e TELEGRAM_CHAT_ID="xxx" \
-  leaflow-auto-checkin:latest \
-  python leaflow_checkin.py
-```
-
-##### 可视化面板（Web UI）
-
-本项目已内置 Web 管理面板（基于 FastAPI + SQLite），支持多账号管理、Cookie 配置、手动签到和日志查看。
-
-**功能特性：**
-1. **多账号管理**：支持添加/删除/启用/禁用账号。
-2. **环境同步**：自动读取 `LEAFLOW_ACCOUNTS` 环境变量中的账号并同步到 Web 面板，无需手动添加。
-3. **Cookie 免密**：支持配置 Cookie 跳过登录。
-4. **实时日志**：Web 端查看运行状态。
-5. **手动触发**：一键运行签到任务。
-6. **灵活端口**：默认端口 8080，可通过 `PORT` 环境变量修改。
-
-**数据持久化：**
-**数据持久化：**
-- 数据文件：`./data/leaflow.db`
-- 已通过 Docker Volume 挂载到宿主机 `./data` 目录。
-
----
-
 ## Fork 后如何更新
 
 如果你已经 Fork 过本仓库，推荐两种方式同步更新：
@@ -197,23 +129,3 @@ git push origin main
     export LEAFLOW_ACCOUNTS="email@example.com:password"
     python leaflow_checkin.py
     ```
-
-## 🔧 技术架构
-
-- **核心**：基于 Selenium WebDriver 模拟真实用户行为。
-- **环境适配**：
-  - 自动识别 GitHub Actions 环境，使用 `headless=new` 模式。
-  - 本地运行时可见浏览器窗口，方便调试。
-  - 使用 `webdriver-manager` 自动管理 ChromeDriver 版本。
-- **稳定性**：
-  - 显式等待（Explicit Waits）确保元素加载。
-  - 智能重试机制处理网络波动。
-  - 详细的日志输出。
-
-## ⚠️ 免责声明
-
-- 本脚本仅用于学习和技术交流，请勿用于非法用途。
-- 使用本脚本所造成的任何后果由使用者自行承担。
-- 请勿滥用此脚本，以免对目标网站造成不必要的负担。
-
-

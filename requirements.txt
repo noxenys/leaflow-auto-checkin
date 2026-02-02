@@ -1,7 +1,4 @@
 selenium>=4.15.0
 requests>=2.31.0
 webdriver-manager>=4.0.1
-fastapi>=0.100.0
-uvicorn>=0.20.0
-apscheduler>=3.10.0
 
