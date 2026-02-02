@@ -914,9 +914,26 @@ class LeaflowAutoCheckin:
             logger.error(f"查找签到按钮时出错: {e}")
             return False
     
+    def _get_balance_value(self):
+        """辅助方法：获取数值型余额"""
+        try:
+            balance_str = self.get_balance()
+            if balance_str and balance_str != "未知":
+                import re
+                match = re.search(r'(\d+\.?\d*)', balance_str)
+                if match:
+                    return float(match.group(1))
+        except Exception:
+            pass
+        return None
+
     def checkin(self):
         """执行签到流程"""
         logger.info("开始签到流程...")
+        
+        # 记录初始余额
+        start_balance = self._get_balance_value()
+        logger.info(f"签到前余额: {start_balance}")
 
         logger.info("尝试方案1：主站工作空间弹窗签到")
         if self.open_checkin_from_workspaces():
@@ -925,7 +942,26 @@ class LeaflowAutoCheckin:
             if checkin_result:
                 if checkin_result == "already_checked_in":
                     return "今日已签到"
-                return self.get_checkin_result()
+                
+                result_msg = self.get_checkin_result()
+                
+                # 如果未提取到具体金额，尝试通过余额变化计算
+                if "获得" not in result_msg and start_balance is not None:
+                    # 等待余额更新
+                    logger.info("未从弹窗获取到金额，尝试计算余额差值...")
+                    time.sleep(3)
+                    self.driver.refresh() # 刷新页面以确保余额更新
+                    time.sleep(5)
+                    
+                    end_balance = self._get_balance_value()
+                    logger.info(f"签到后余额: {end_balance}")
+                    
+                    if end_balance is not None and end_balance > start_balance:
+                        diff = round(end_balance - start_balance, 2)
+                        if diff > 0:
+                            return f"签到成功！您获得了 {diff} 元奖励！"
+                
+                return result_msg
         else:
             logger.warning("方案1失败，尝试备选方案")
 
@@ -936,11 +972,29 @@ class LeaflowAutoCheckin:
                 self.safe_get(url, max_retries=1, wait_between=3)
                 
                 if self.wait_for_checkin_page_loaded(max_retries=2, wait_time=15):
+                    # 在方案2中也尝试记录初始余额（因为切换了页面）
+                    current_start_balance = self._get_balance_value()
+                    
                     checkin_result = self.find_and_click_checkin_button()
                     if checkin_result:
                         if checkin_result == "already_checked_in":
                             return "今日已签到"
-                        return self.get_checkin_result()
+                        
+                        result_msg = self.get_checkin_result()
+                        
+                        if "获得" not in result_msg and current_start_balance is not None:
+                             logger.info("未从弹窗获取到金额，尝试计算余额差值...")
+                             time.sleep(3)
+                             self.driver.refresh()
+                             time.sleep(5)
+                             end_balance = self._get_balance_value()
+                             logger.info(f"签到后余额: {end_balance}")
+                             if end_balance is not None and end_balance > current_start_balance:
+                                 diff = round(end_balance - current_start_balance, 2)
+                                 if diff > 0:
+                                     return f"签到成功！您获得了 {diff} 元奖励！"
+                        
+                        return result_msg
             except Exception as e:
                 logger.warning(f"访问 {url} 失败: {e}")
                 continue
