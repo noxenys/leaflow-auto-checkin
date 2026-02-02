@@ -960,6 +960,8 @@ class LeaflowAutoCheckin:
                         diff = round(end_balance - start_balance, 2)
                         if diff > 0:
                             return f"签到成功！您获得了 {diff} 元奖励！"
+                    else:
+                        logger.warning(f"余额未增加: start={start_balance}, end={end_balance}")
                 
                 return result_msg
         else:
@@ -972,9 +974,6 @@ class LeaflowAutoCheckin:
                 self.safe_get(url, max_retries=1, wait_between=3)
                 
                 if self.wait_for_checkin_page_loaded(max_retries=2, wait_time=15):
-                    # 在方案2中也尝试记录初始余额（因为切换了页面）
-                    current_start_balance = self._get_balance_value()
-                    
                     checkin_result = self.find_and_click_checkin_button()
                     if checkin_result:
                         if checkin_result == "already_checked_in":
@@ -982,17 +981,19 @@ class LeaflowAutoCheckin:
                         
                         result_msg = self.get_checkin_result()
                         
-                        if "获得" not in result_msg and current_start_balance is not None:
+                        if "获得" not in result_msg and start_balance is not None:
                              logger.info("未从弹窗获取到金额，尝试计算余额差值...")
                              time.sleep(3)
                              self.driver.refresh()
                              time.sleep(5)
                              end_balance = self._get_balance_value()
                              logger.info(f"签到后余额: {end_balance}")
-                             if end_balance is not None and end_balance > current_start_balance:
-                                 diff = round(end_balance - current_start_balance, 2)
+                             if end_balance is not None and end_balance > start_balance:
+                                 diff = round(end_balance - start_balance, 2)
                                  if diff > 0:
                                      return f"签到成功！您获得了 {diff} 元奖励！"
+                             else:
+                                 logger.warning(f"余额未增加: start={start_balance}, end={end_balance}")
                         
                         return result_msg
             except Exception as e:
