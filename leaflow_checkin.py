@@ -59,6 +59,10 @@ class LeaflowAutoCheckin:
         chrome_options = Options()
         chrome_options.page_load_strategy = "eager"
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--lang=zh-CN')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
         
         if os.getenv('GITHUB_ACTIONS') or os.getenv('RUNNING_IN_DOCKER'):
             logger.info("Running in headless mode (CI/Docker)")
@@ -95,11 +99,10 @@ class LeaflowAutoCheckin:
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
             
             try:
+                self.driver = webdriver.Chrome(options=chrome_options)
+            except:
                 service = Service(ChromeDriverManager().install())
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
             except Exception:
@@ -727,6 +730,14 @@ class LeaflowAutoCheckin:
             iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
             if iframes:
                 logger.info(f"检测到 {len(iframes)} 个 iframe，尝试在 iframe 中查找按钮")
+                
+                # 临时降低超时时间，防止在某些 iframe 上卡住太久
+                original_timeout = 60
+                try:
+                    self.driver.set_page_load_timeout(10)
+                except:
+                    pass
+
                 for i, frame in enumerate(iframes):
                     try:
                         self.driver.switch_to.frame(frame)
@@ -763,6 +774,12 @@ class LeaflowAutoCheckin:
                     except Exception as e:
                         logger.warning(f"处理 iframe {i+1} 时出错: {e}")
                         self.driver.switch_to.default_content()
+
+                # 恢复默认超时
+                try:
+                    self.driver.set_page_load_timeout(original_timeout)
+                except:
+                    pass
 
             priority_selectors = [
                 "//button[contains(., '立即签到')]",
@@ -907,9 +924,17 @@ class LeaflowAutoCheckin:
                                 
                             logger.warning("点击后未检测到按钮状态变化，判定点击未生效")
                             continue
-                except Exception:
+                except Exception as e:
+                    # 捕获异常并继续，防止因单个 iframe 错误导致整个循环中断
+                    # logger.debug(f"遍历 iframe 时忽略异常: {e}")
                     continue
             
+            # 恢复默认超时
+            try:
+                self.driver.set_page_load_timeout(original_timeout)
+            except:
+                pass
+
             logger.info("常规选择器未找到，尝试 JS 智能搜索点击...")
             js_fallback_texts = ["立即签到", "签到"]
             if self._js_click_by_text(js_fallback_texts, timeout=8):

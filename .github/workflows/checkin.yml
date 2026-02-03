@@ -42,3 +42,13 @@ jobs:
         PYTHONIOENCODING: utf-8
       run: |
         python leaflow_checkin.py
+
+    - name: Upload screenshots and logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-screenshots
+        path: |
+          *.png
+          *.log
+        retention-days: 5
