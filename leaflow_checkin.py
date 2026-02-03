@@ -972,6 +972,9 @@ class LeaflowAutoCheckin:
                     else:
                         logger.warning(f"余额未增加: start={start_balance}, end={end_balance}")
                 
+                if result_msg == "未检测到明确结果":
+                    return "签到失败：未检测到奖励，且余额未增加"
+
                 return result_msg
         else:
             logger.warning("方案1失败，尝试备选方案")
@@ -1002,8 +1005,11 @@ class LeaflowAutoCheckin:
                                  if diff > 0:
                                      return f"签到成功！您获得了 {diff} 元奖励！"
                              else:
-                                 logger.warning(f"余额未增加: start={start_balance}, end={end_balance}")
+                                logger.warning(f"余额未增加: start={start_balance}, end={end_balance}")
                         
+                        if result_msg == "未检测到明确结果":
+                            return "签到失败：未检测到奖励，且余额未增加"
+
                         return result_msg
             except Exception as e:
                 logger.warning(f"访问 {url} 失败: {e}")
@@ -1089,7 +1095,7 @@ class LeaflowAutoCheckin:
             except:
                 pass
             
-            return "签到成功！" # 默认返回成功，因为前面 checkin() 已经确认点击成功
+            return "未检测到明确结果"
             
         except Exception as e:
             return f"获取结果出错: {str(e)}"
