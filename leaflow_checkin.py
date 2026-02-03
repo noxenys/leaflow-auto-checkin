@@ -99,7 +99,12 @@ class LeaflowAutoCheckin:
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            self.driver = webdriver.Chrome(options=chrome_options)
+            try:
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            except Exception:
+                # Fallback to default if manager fails (though manager is safer)
+                self.driver = webdriver.Chrome(options=chrome_options)
         
         try:
             self.driver.set_page_load_timeout(60)
@@ -890,14 +895,18 @@ class LeaflowAutoCheckin:
                                     return True
                                 
                                 new_text = checkin_btn.text.strip()
-                                if new_text != btn_text or "已" in new_text:
+                                if new_text != btn_text or "已" in new_text or "完成" in new_text:
                                     logger.info(f"点击后按钮文本变为: {new_text}，判定为点击成功")
+                                    return True
+                                if not checkin_btn.is_enabled():
+                                    logger.info("点击后按钮已禁用，判定为点击成功")
                                     return True
                             except Exception:
                                 logger.info("点击后元素状态改变，判定为点击成功")
                                 return True
                                 
-                            return True
+                            logger.warning("点击后未检测到按钮状态变化，判定点击未生效")
+                            continue
                 except Exception:
                     continue
             
