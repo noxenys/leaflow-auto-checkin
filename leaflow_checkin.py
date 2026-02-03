@@ -1167,6 +1167,16 @@ class LeaflowAutoCheckin:
                 raise Exception("登录失败")
                 
         except Exception as e:
+            # 发生异常时，强制截图
+            if self.driver:
+                try:
+                    timestamp = datetime.now().strftime("%H%M%S")
+                    filename = f"error_snapshot_{timestamp}.png"
+                    self.driver.save_screenshot(filename)
+                    logger.info(f"已保存错误现场截图: {filename}")
+                except:
+                    pass
+
             error_msg = f"自动签到失败: {str(e)}"
             if self._is_driver_timeout(str(e)):
                 logger.warning("检测到驱动超时，尝试重启驱动并重试一次...")
@@ -1184,6 +1194,11 @@ class LeaflowAutoCheckin:
         
         finally:
             if self.driver:
+                try:
+                    # 无论成功失败，最后都保存一张状态截图
+                    self.driver.save_screenshot("final_state.png")
+                except:
+                    pass
                 self.driver.quit()
 
 class MultiAccountManager:
