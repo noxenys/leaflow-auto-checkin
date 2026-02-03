@@ -102,12 +102,14 @@ class LeaflowAutoCheckin:
             
             try:
                 self.driver = webdriver.Chrome(options=chrome_options)
-            except:
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
             except Exception:
-                # Fallback to default if manager fails (though manager is safer)
-                self.driver = webdriver.Chrome(options=chrome_options)
+                logger.info("Direct ChromeDriver init failed, trying webdriver-manager...")
+                try:
+                    service = Service(ChromeDriverManager().install())
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception as e:
+                    logger.error(f"Failed to initialize ChromeDriver: {e}")
+                    raise
         
         try:
             self.driver.set_page_load_timeout(60)
