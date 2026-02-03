@@ -25,5 +25,6 @@ skills/
 data/
 test_checkin.py
 *.html
+*.png
 .editorconfig
 .dockerignore
