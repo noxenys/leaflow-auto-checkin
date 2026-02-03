@@ -727,6 +727,22 @@ class LeaflowAutoCheckin:
         
         try:
             time.sleep(2)
+
+            # 0. 优先检查是否已经签到（检查文本"今日已签到"或"已完成"按钮）
+            try:
+                success_indicators = [
+                    "//*[contains(text(), '今日已签到')]",
+                    "//button[contains(., '已完成')]",
+                    "//div[contains(., '已完成')]"
+                ]
+                for indicator in success_indicators:
+                    elements = self.driver.find_elements(By.XPATH, indicator)
+                    for el in elements:
+                        if el.is_displayed():
+                            logger.info(f"检测到已签到状态 (Indicator: {indicator})")
+                            return "already_checked_in"
+            except:
+                pass
             
             # 尝试处理 iframe 情况
             iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
@@ -750,14 +766,23 @@ class LeaflowAutoCheckin:
                             # 1. 尝试 JS 智能定位
                             script = """
                             const texts = ['立即签到', '签到'];
+                            const checked_texts = ['已签到', '已完成', '今日已签到'];
                             const nodes = document.querySelectorAll('button, div[role="button"], a[role="button"], .ant-btn');
+                            
                             for (const el of nodes) {
                                 const text = (el.innerText || '').trim();
+                                if (checked_texts.some(t => text.includes(t))) return 'ALREADY_CHECKED_IN';
                                 if (texts.some(t => text.includes(t))) return el;
                             }
                             return null;
                             """
                             btn = self.driver.execute_script(script)
+                            
+                            if btn == 'ALREADY_CHECKED_IN':
+                                logger.info("在 iframe 内部检测到已签到状态")
+                                self.driver.switch_to.default_content()
+                                return "already_checked_in"
+
                             if btn:
                                 logger.info("在 iframe 内部找到按钮，开始物理轰炸...")
                                 # 执行 ActionChains 物理点击
